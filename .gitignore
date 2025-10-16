@@ -1,0 +1,13 @@
+__pycache__
+.vscode/
+
+__pycache__/
+violations/
+# weights/
+logs/
+data/person/
+
+camera_worker1.py
+debug_model.py
+new_gui.py
+venv/

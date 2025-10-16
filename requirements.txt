@@ -1,0 +1,7 @@
+ultralytics 
+torch 
+opencv-python 
+pyserial 
+pyyaml 
+requests
+torchvision
