@@ -1,6 +1,8 @@
+# camera_worker.py
 import cv2
 import time
 import os
+import numpy as np
 from datetime import datetime
 from src.alarm import send_buzzer_command
 from src.helmet_detector import run_detection, load_model, load_class_names
@@ -30,7 +32,7 @@ def save_violation_images(frame, detection, cam_id, frame_count, violation_index
     except Exception as e:
         print(f"🔴 [ERROR] Cam {cam_id}: Could not save violation image: {e}")
 
-def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event):
+def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event, rois_state, roi_lock): 
     
     # --- Load model and settings inside the thread ---
     print(f"[INFO] Thread {cam_id} started. Loading model...")
@@ -40,7 +42,7 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event):
         threshold = config['confidence_threshold']
         cooldown = config.get('alarm_cooldown_sec', 5)
         use_wifi = config.get('use_wifi', False)
-        esp_ip = config.get('esp_ip', None)
+        esp_ip = config.get('esp_ip', None)        
         print(f"[INFO] Thread {cam_id}: Model loaded successfully.")
     except Exception as e:
         print(f"🔴 [FATAL] Thread {cam_id} failed to initialize: {e}")
@@ -55,7 +57,6 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event):
     last_image_save_time = 0
     buzzer_is_on = False
 
-    # --- Check stop_event in the main loop ---
     while not stop_event.is_set():
         try:
             ret, frame = cap.read()
@@ -70,12 +71,28 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event):
             start_time = time.time()
             resized = cv2.resize(frame, RESIZE_DIM)
 
+            # --- Get the latest ROI for this camera ---
+            with roi_lock:
+                roi_np = rois_state.get(str(cam_id))
+
             detections = run_detection(model, resized, threshold)
+
+            # --- ROI Filtering logic ---
+            if roi_np is not None:
+                filtered_detections = []
+                for det in detections:
+                    x1, y1, x2, y2 = det['box']
+                    point_to_check = (int((x1 + x2) / 2), int(y2))
+                    
+                    if cv2.pointPolygonTest(roi_np, point_to_check, False) >= 0:
+                        filtered_detections.append(det)
+                detections = filtered_detections
 
             current_violations = [det for det in detections if det['class'] == no_helmet_class]
             no_of_violations = len(current_violations)
             violation_in_frame = no_of_violations > 0
 
+            # --- Alarm logic ---
             if violation_in_frame:
                 if not buzzer_is_on:
                     print(f"[ALARM ON] No helmet detected on Camera {cam_id}")
@@ -94,15 +111,23 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event):
                     send_buzzer_command(False, use_wifi, esp_ip)
                     buzzer_is_on = False
 
-            # Draw bounding boxes
+            # --- Draw ROI on frame ---
+            if roi_np is not None:
+                cv2.polylines(resized, [roi_np], isClosed=True, color=(255, 255, 0), thickness=2)
+
+            # --- Draw bounding boxes ---
             for det in detections:
-                x1, y1, x2, y2 = map(int, det['box'])
                 class_name = det['class']
+                if class_name != no_helmet_class:
+                    continue
+
+                x1, y1, x2, y2 = map(int, det['box'])
                 label = f"{class_name.upper()} {det['conf']:.2f}"
-                color = (0, 255, 0) if class_name == helmet_class else (0, 0, 255)
+                color = (0, 0, 255) 
                 cv2.rectangle(resized, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(resized, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             
+            # --- Starts display and frame_dict update ---
             fps = 1 / (time.time() - start_time)
             stat = f"Cam {cam_id} | FPS: {fps:.2f} | Violations: {no_of_violations}"
             cv2.putText(resized, stat, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
@@ -110,10 +135,9 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event):
             with lock:
                 frame_dict[cam_id] = resized.copy()
 
-        # --- Add exception handling inside the loop ---
         except Exception as e:
             print(f"🔴 [ERROR] An error occurred in camera_loop for Cam {cam_id}: {e}")
-            time.sleep(5) # Wait before retrying to avoid spamming errors
+            time.sleep(5) 
 
     print(f"[INFO] Thread {cam_id} received stop signal. Cleaning up.")
     cap.release()
