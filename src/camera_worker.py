@@ -1,11 +1,10 @@
-# camera_worker.py
 import cv2
 import time
 import os
 import numpy as np
 from datetime import datetime
 from src.alarm import send_buzzer_command
-from src.helmet_detector import run_detection, load_model, load_class_names
+from src.helmet_detector import run_detection
 
 RESIZE_DIM = (640, 480)
 
@@ -32,18 +31,16 @@ def save_violation_images(frame, detection, cam_id, frame_count, violation_index
     except Exception as e:
         print(f"🔴 [ERROR] Cam {cam_id}: Could not save violation image: {e}")
 
-def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event, rois_state, roi_lock): 
+def camera_loop(cam_id, stream_url, config, frame_dict, lock, thread_stop_events, rois_state, roi_lock, model, helmet_class, no_helmet_class):
     
     # --- Load model and settings inside the thread ---
     print(f"[INFO] Thread {cam_id} started. Loading model...")
     try:
-        model = load_model(config['model_path'])
-        _, helmet_class, no_helmet_class = load_class_names(config['class_file'])
         threshold = config['confidence_threshold']
         cooldown = config.get('alarm_cooldown_sec', 5)
         use_wifi = config.get('use_wifi', False)
-        esp_ip = config.get('esp_ip', None)        
-        print(f"[INFO] Thread {cam_id}: Model loaded successfully.")
+        esp_ip = config.get('esp_ip', None)
+        print(f"[INFO] Thread {cam_id}: Configuration loaded.")
     except Exception as e:
         print(f"🔴 [FATAL] Thread {cam_id} failed to initialize: {e}")
         return # Exit the thread if setup fails
@@ -57,7 +54,7 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event, rois_s
     last_image_save_time = 0
     buzzer_is_on = False
 
-    while not stop_event.is_set():
+    while not thread_stop_events[cam_id].is_set():
         try:
             ret, frame = cap.read()
             if not ret:
@@ -75,6 +72,7 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, stop_event, rois_s
             with roi_lock:
                 roi_np = rois_state.get(str(cam_id))
 
+            # --- This call now uses the shared 'model' object ---
             detections = run_detection(model, resized, threshold)
 
             # --- ROI Filtering logic ---

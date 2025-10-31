@@ -5,6 +5,13 @@ import yaml
 def load_model(model_path):
     model = YOLO(model_path)
     # model.to('cuda')
+
+    try:
+        model.fuse()
+        print("[INFO] Model layers fused successfully.")
+    except Exception as e:
+        print(f"[WARNING] Could not fuse model layers: {e}. Proceeding anyway.")
+
     return model
 
 
