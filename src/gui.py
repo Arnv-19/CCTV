@@ -17,6 +17,10 @@ class HelmetGUI:
         self.root = root
         self.root.title("Helmet Detection Control Panel")
 
+        # --- Process and thread tracking ---
+        self.process = None # To store the subprocess.Popen object
+        self.runner_thread = None # To store the thread running the subprocess
+
         # Create a thread-safe queue for log messages
         self.log_queue = queue.Queue()
 
@@ -25,6 +29,9 @@ class HelmetGUI:
 
         # Start the process of checking the queue
         self.process_log_queue()
+
+        # --- Add window close protocol handler ---
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def load_config(self):
         try:
@@ -182,16 +189,20 @@ class HelmetGUI:
         Runs the main detection script in a separate thread and
         sends its output to the log_queue.
         """
+        
+        if self.process:
+            messagebox.showwarning("Warning", "Process is already running.")
+            return
+
         def runner():
-            # Check if using 'python' or 'python3' is more appropriate
-            # On Windows, it's often 'python'. On Linux/macOS, 'python3'.
             python_executable = "python" if os.name == 'nt' else "python3"
             
             self.log_output.delete(1.0, tk.END) # Clear previous logs
             self.log_output.insert(tk.END, f"--- Starting process: {python_executable} main.py ---\n")
 
             try:
-                process = subprocess.Popen(
+                # --- Store the process in self.process ---
+                self.process = subprocess.Popen(
                     [python_executable, "./main.py"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -201,23 +212,43 @@ class HelmetGUI:
                 )
 
                 # Read output line by line and put it into the queue
-                for line in iter(process.stdout.readline, ''):
+                for line in iter(self.process.stdout.readline, ''):
                     self.log_queue.put(line)
                 
-                process.stdout.close()
-                process.wait()
+                self.process.stdout.close()
+                self.process.wait()
                 self.log_queue.put("--- Process finished ---\n")
+                self.process = None # Clear process when done
 
             except FileNotFoundError:
                 msg = f"Error: '{python_executable}' not found.\n"
                 msg += "Please ensure Python is in your system's PATH.\n"
                 msg += "You might need to change the 'python_executable' variable in gui.py.\n"
                 self.log_queue.put(msg)
+                self.process = None
             except Exception as e:
                 self.log_queue.put(f"--- An unexpected error occurred: {e} ---\n")
+                self.process = None
 
-        # Start the runner function in a daemon thread
-        threading.Thread(target=runner, daemon=True).start()
+        # --- Start a non-daemon thread and store it ---
+        self.runner_thread = threading.Thread(target=runner)
+        self.runner_thread.start()
+
+    # --- Handles graceful shutdown ---
+    def on_closing(self):
+        """Called when the user clicks the 'x' on the GUI window."""
+        if self.process:
+            print("[GUI] Terminating main.py subprocess...")
+            self.log_queue.put("--- Sending shutdown signal to main.py ---\n")
+            self.process.terminate() # Send SIGTERM (this triggers atexit in main.py)
+            
+            # Wait for the runner thread to finish
+            if self.runner_thread and self.runner_thread.is_alive():
+                self.runner_thread.join(timeout=2) # Wait max 2s
+        
+        print("[GUI] Closing GUI.")
+        self.root.destroy()
+
 
 if __name__ == '__main__':
     root = tk.Tk()

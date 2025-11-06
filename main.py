@@ -26,7 +26,25 @@ def load_config(path='./config/config.yaml'):
 
 def cleanup_all():
     print("[EXIT] Cleaning up resources...")
-    # Signal all running threads to stop
+
+    # <--- Save any pending ROIs on exit --->
+    try:
+        pending_saves = False
+        for cam_id_str, points in list(roi_setup_points.items()):
+            if points and len(points) >= 3:
+                print(f"[EXIT] Saving pending ROI for Cam {cam_id_str}...")
+                roi_np = np.array(points, dtype=np.int32)
+                with roi_lock:
+                    rois_state[cam_id_str] = roi_np
+                pending_saves = True
+        
+        if pending_saves:
+            save_rois(rois_state)
+            print("[EXIT] All pending ROIs saved.")
+    except Exception as e:
+        print(f"[EXIT] Error saving pending ROIs: {e}")
+
+    # <--- Signal all running threads to stop --->
     for cam_id, event in thread_stop_events.items():
         if not event.is_set():
             print(f"[EXIT] Sending stop signal to thread {cam_id}...")
@@ -102,7 +120,6 @@ def mouse_callback(event, x, y, flags, param):
             print(f"[ROI] Cam {cam_id_str}: Cannot save (Middle-Click). Need at least 3 points.")
 
 
-# --- MODIFIED: display_frames with all UI fixes ---
 def display_frames(camera_titles):
     print("\n[INFO] Display started. Press 'q' to quit all.")
     print("--- ROI CONTROLS (on any camera window) ---")
@@ -110,7 +127,7 @@ def display_frames(camera_titles):
     print(" Double-Click:     Save polygon (min 3 points)")
     print(" Middle-Click:     Save polygon (min 3 points)")
     print(" Right-Click:      Remove last point (or clear saved ROI)")
-    print(" Click 'x' on a window to close just that stream.")
+    print(" Click 'x' on a window to save pending ROI & close stream.")
     
     window_titles = {}
     for cam_id in range(len(camera_titles)):
@@ -133,6 +150,17 @@ def display_frames(camera_titles):
             try:
                 if cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) < 1:
                     print(f"[INFO] Window '{title}' (Cam {cam_id}) closed by user.")
+                    
+                    # --- Save pending ROI on window 'x' close ---
+                    cam_id_str = str(cam_id)
+                    if cam_id_str in roi_setup_points and len(roi_setup_points[cam_id_str]) >= 3:
+                        print(f"[ROI] Saving pending ROI for Cam {cam_id_str} on window close.")
+                        points = roi_setup_points.pop(cam_id_str)
+                        roi_np = np.array(points, dtype=np.int32)
+                        with roi_lock:
+                            rois_state[cam_id_str] = roi_np
+                        save_rois(rois_state) # Save to file
+
                     thread_stop_events[cam_id].set() # Signal thread to stop
                     cv2.destroyWindow(title)
                     del window_titles[cam_id] # Remove from display loop
@@ -163,7 +191,8 @@ def display_frames(camera_titles):
                 # Show the modified copy
                 cv2.imshow(title, display_frame) 
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        key = cv2.waitKey(1)
+        if key & 0xFF == ord('q'):
             print("[INFO] 'q' pressed. Shutting down all streams.")
             running = False # Break the display loop
         
@@ -172,7 +201,12 @@ def display_frames(camera_titles):
             print("[INFO] All camera windows are closed. Exiting.")
             running = False
 
-    # After loop breaks, let atexit handle the full cleanup
+    print("[INFO] Display loop finished.")
+    
+    # Need to stop all threads IF 'q' was pressed
+    for cam_id, event in thread_stop_events.items():
+        event.set()
+
     cv2.destroyAllWindows()
 
 def main():
@@ -193,13 +227,18 @@ def main():
         else:
             print("[INFO] WiFi mode is enabled. Skipping serial initialization.")
 
-        print("[INFO] Loading shared YOLO model...")
+        # --- Load Models ---
         try:
-            model = load_model(config['model_path'])
+            print("[INFO] Loading Helmet Model...")
+            helmet_model = load_model(config['model_path'])
             _, helmet_class, no_helmet_class = load_class_names(config['class_file'])
-            print("[INFO] Model and class names loaded successfully.")
+
+            print("[INFO] Loading Person Model...")
+            person_model_path = config.get('person_model_path', 'yolov8n.pt') 
+            person_model = load_model(person_model_path)
+            print("[INFO] Models loaded successfully.")
         except Exception as e:
-            print(f"🔴 [FATAL] Could not load model or class file: {e}")
+            print(f"🔴 [FATAL] Could not load models or class file: {e}")
             return
 
         feeds = config['camera_feeds']
@@ -220,7 +259,8 @@ def main():
                 frame_dict, lock, 
                 thread_stop_events, # Pass the whole dict
                 rois_state, roi_lock,
-                model, helmet_class, no_helmet_class
+                helmet_model, person_model, # Pass BOTH models
+                helmet_class, no_helmet_class
             ))
             t.daemon = True
             t.start()
@@ -234,11 +274,11 @@ def main():
         display_frames(titles)
 
     except FileNotFoundError as e:
-        print(f"[ERROR] A required file was not found: {e}")
+        print(f"🔴 [FATAL] A required file was not found: {e}")
     except KeyError as e:
-        print(f"[ERROR] Missing a required key in config.yaml: {e}")
+        print(f"🔴 [FATAL] Missing a required key in config.yaml: {e}")
     except Exception as e:
-        print(f"[ERROR] An unexpected error occurred in main: {e}")
+        print(f"🔴 [FATAL] An unexpected error occurred in main: {e}")
     finally:
         print("[INFO] Main script finished.")
 

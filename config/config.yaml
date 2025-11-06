@@ -1,13 +1,13 @@
 alarm_cooldown_sec: 15
+person_image_cooldown_sec: 30
 camera_feeds:
-- data/helmet_detection.mp4
-- data/helmet_detection(1).mp4
+- data/ROI_Person_Testing(3).mp4
 camera_titles:
-- All Helmet
-- Testing
+- Camera 0
 class_file: data/class_names.yaml
 confidence_threshold: 0.5
 esp_ip: 192.168.0.231
 model_path: weights/helmet_model.pt
+person_model_path: weights/person_model.pt
 serial_port: COM4
 use_wifi: false
