@@ -64,16 +64,15 @@ def save_person_image(frame, box, track_id, cam_id, frame_count, person_index):
 
 def camera_loop(cam_id, stream_url, config, frame_dict, lock, thread_stop_events, 
                 rois_state, roi_lock, helmet_model, person_model, 
-                helmet_class, no_helmet_class):
+                helmet_class, no_helmet_class, assigned_esp_ip):
     
-    print(f"[INFO] Thread {cam_id} started.")
+    print(f"[INFO] Thread {cam_id} started. Binding to ESP IP: {assigned_esp_ip}")
     try:
         threshold = config['confidence_threshold']
         cooldown = config.get('alarm_cooldown_sec', 5)
         person_image_cooldown = config.get('person_image_cooldown_sec', 30)
         use_wifi = config.get('use_wifi', False)
-        esp_ip = config.get('esp_ip', None)
-        print(f"[INFO] Thread {cam_id}: Configuration loaded.")
+        # Using passed 'assigned_esp_ip'
     except Exception as e:
         print(f"🔴 [FATAL] Thread {cam_id} configuration failed: {e}")
         return
@@ -125,7 +124,6 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, thread_stop_events
                 p_results = person_model.track(resized, persist=True, classes=[0], verbose=False, stream=False)[0]
                 
                 if p_results.boxes and p_results.boxes.id is not None:
-                    # Extract boxes and IDs. Ensure they are on CPU and numpy format.
                     boxes = p_results.boxes.xyxy.cpu().numpy()
                     track_ids = p_results.boxes.id.int().cpu().tolist()
 
@@ -158,8 +156,9 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, thread_stop_events
                     reason = []
                     if helmet_violation_active: reason.append("NO HELMET")
                     if person_in_roi_active: reason.append("PERSON IN ROI")
-                    print(f"[ALARM ON] Cam {cam_id} triggered by: {', '.join(reason)}")
-                    send_buzzer_command(True, use_wifi, esp_ip)
+                    print(f"[ALARM ON] Cam {cam_id} triggered by: {', '.join(reason)} -> Sending to IP: {assigned_esp_ip}")
+                    # Using assigned_esp_ip here
+                    send_buzzer_command(True, use_wifi, assigned_esp_ip) 
                     buzzer_is_on = True
 
                 # Handle Helmet Image Saving (Cooldown applies to saving images, not the buzzer)
@@ -179,7 +178,8 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, thread_stop_events
             else:
                 if buzzer_is_on:
                     print(f"[ALARM OFF] All cleared on Camera {cam_id}")
-                    send_buzzer_command(False, use_wifi, esp_ip)
+                    # Using assigned_esp_ip here
+                    send_buzzer_command(False, use_wifi, assigned_esp_ip)
                     buzzer_is_on = False
 
             if roi_np is not None:
@@ -188,12 +188,9 @@ def camera_loop(cam_id, stream_url, config, frame_dict, lock, thread_stop_events
 
             # Draw Helmet detections 
             for det in helmet_detections:
-                class_name = det['class']
-                
-                # --- Only draw "no_helmet_class" ---
-                if class_name == no_helmet_class:
+                if det['class'] == no_helmet_class:
                     x1, y1, x2, y2 = map(int, det['box'])
-                    label = f"{class_name.upper()} {det['conf']:.2f}"
+                    label = f"{det['class'].upper()} {det['conf']:.2f}"
                     cv2.rectangle(resized, (x1, y1), (x2, y2), (0, 0, 255), 2)
                     cv2.putText(resized, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 

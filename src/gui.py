@@ -18,19 +18,13 @@ class HelmetGUI:
         self.root.title("Helmet Detection Control Panel")
 
         # --- Process and thread tracking ---
-        self.process = None # To store the subprocess.Popen object
-        self.runner_thread = None # To store the thread running the subprocess
-
-        # Create a thread-safe queue for log messages
+        self.process = None 
+        self.runner_thread = None 
         self.log_queue = queue.Queue()
 
         self.load_config()
         self.setup_ui()
-
-        # Start the process of checking the queue
         self.process_log_queue()
-
-        # --- Add window close protocol handler ---
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def load_config(self):
@@ -56,61 +50,70 @@ class HelmetGUI:
         # ==== Camera Input Fields ====
         self.camera_entries = []
         self.title_entries = []
+        self.esp_ip_entries = []  # <--- NEW: List to store ESP IP entries
 
-        cam_frame = tk.LabelFrame(self.root, text="Camera URLs")
+        cam_frame = tk.LabelFrame(self.root, text="Camera Configuration")
         cam_frame.pack(fill="x", padx=10, pady=5)
 
         for i in range(4):
             frame = tk.Frame(cam_frame)
             frame.pack(fill="x", pady=2)
-            tk.Label(frame, text=f"Camera {i+1}:").pack(side="left")
+            tk.Label(frame, text=f"Cam {i+1}:").pack(side="left")
 
-            url_entry = tk.Entry(frame, width=60)
+            # Camera URL
+            url_entry = tk.Entry(frame, width=40)
             url_entry.pack(side="left", padx=5)
             if i < len(self.config.get('camera_feeds', [])):
                 url_entry.insert(0, self.config['camera_feeds'][i])
             self.camera_entries.append(url_entry)
 
-            title_entry = tk.Entry(frame, width=20)
+            # Camera Title
+            tk.Label(frame, text="Title:").pack(side="left")
+            title_entry = tk.Entry(frame, width=15)
             title_entry.pack(side="left", padx=5)
             if i < len(self.config.get('camera_titles', [])):
                 title_entry.insert(0, self.config['camera_titles'][i])
             self.title_entries.append(title_entry)
 
+            # ESP IP (Bind to this Camera)
+            tk.Label(frame, text="ESP IP:").pack(side="left")
+            esp_entry = tk.Entry(frame, width=15)
+            esp_entry.pack(side="left", padx=5)
+            # Load existing ESP IP if available
+            esp_ips = self.config.get('camera_esp_ips', [])
+            if i < len(esp_ips):
+                esp_entry.insert(0, esp_ips[i])
+            self.esp_ip_entries.append(esp_entry)
+
         btn_frame = tk.Frame(cam_frame)
         btn_frame.pack(pady=5)
-        tk.Button(btn_frame, text="Update Cameras",
+        tk.Button(btn_frame, text="Update Configuration",
                   command=self.update_camera_feeds).pack()
 
-        # ==== ESP Settings ====
-        esp_frame = tk.LabelFrame(self.root, text="ESP Settings")
+        # ==== ESP Global Settings ====
+        esp_frame = tk.LabelFrame(self.root, text="Global Settings")
         esp_frame.pack(fill="x", padx=10, pady=5)
 
-        tk.Label(esp_frame, text="ESP IP:").pack(side="left", padx=5)
-        self.esp_ip_entry = tk.Entry(esp_frame, width=20)
-        self.esp_ip_entry.pack(side="left")
-        self.esp_ip_entry.insert(0, self.config.get('esp_ip', ''))
+        # Removed single global ESP IP entry, now per-camera above.
 
         self.use_wifi_var = tk.BooleanVar(
             value=self.config.get('use_wifi', False))
-        tk.Checkbutton(esp_frame, text="Use WiFi",
+        tk.Checkbutton(esp_frame, text="Use WiFi Mode",
                        variable=self.use_wifi_var).pack(side="left", padx=10)
 
-        tk.Label(esp_frame, text="Serial Port:").pack(side="left", padx=5)
+        tk.Label(esp_frame, text="Serial Port (if not WiFi):").pack(side="left", padx=5)
         self.serial_port_entry = tk.Entry(esp_frame, width=20)
         self.serial_port_entry.pack(side="left")
-
-        # Get the serial port from the config dict, providing '' as a default
         self.serial_port_entry.insert(0, self.config.get('serial_port', ''))
 
-        tk.Button(esp_frame, text="WiFi Settings",
-                  command=self.open_wifi_settings).pack(side="left", padx=10)
-        tk.Button(esp_frame, text="Update ESP Config",
+        # tk.Button(esp_frame, text="WiFi Credentials (ESP.ino)",
+        #           command=self.open_wifi_settings).pack(side="left", padx=10)
+        tk.Button(esp_frame, text="Update Global Settings",
                   command=self.update_esp_config).pack(side="left", padx=10)
 
         # ==== Run Button ====
-        tk.Button(self.root, text="RUN", command=self.run_script,
-                  height=2, width=15, bg='green', fg='white').pack(pady=10)
+        tk.Button(self.root, text="RUN SYSTEM", command=self.run_script,
+                  height=2, width=20, bg='green', fg='white').pack(pady=10)
 
         # ==== Logs ====
         log_frame = tk.LabelFrame(self.root, text="Logs")
@@ -120,30 +123,31 @@ class HelmetGUI:
         self.log_output.pack(fill="both", expand=True)
 
     def update_camera_feeds(self):
-        self.config['camera_feeds'] = [e.get().strip()
-                                        for e in self.camera_entries if e.get().strip()]
-        self.config['camera_titles'] = [t.get().strip()
-                                        for t in self.title_entries][:len(self.config['camera_feeds'])]
+        # Update Feeds
+        self.config['camera_feeds'] = [e.get().strip() for e in self.camera_entries if e.get().strip()]
+        
+        # Update Titles (limit to number of feeds)
+        count = len(self.config['camera_feeds'])
+        self.config['camera_titles'] = [t.get().strip() for t in self.title_entries][:count]
+        
+        # Update ESP IPs (limit to number of feeds)
+        self.config['camera_esp_ips'] = [e.get().strip() for e in self.esp_ip_entries][:count]
+
         self.save_config()
-        messagebox.showinfo(
-            "Saved", "Camera feeds and titles updated in config.yaml")
+        messagebox.showinfo("Saved", "Camera feeds, titles, and ESP bindings updated.")
 
     def update_esp_config(self):
-        self.config['esp_ip'] = self.esp_ip_entry.get().strip()
         self.config['use_wifi'] = self.use_wifi_var.get()
         self.config['serial_port'] = self.serial_port_entry.get().strip()
         self.save_config()
-
-        messagebox.showinfo("Saved", "ESP and Serial config updated")
+        messagebox.showinfo("Saved", "Global settings updated")
 
     def open_wifi_settings(self):
         win = tk.Toplevel(self.root)
         win.title("WiFi Settings")
-
         tk.Label(win, text="SSID:").grid(row=0, column=0, padx=10, pady=5)
         ssid_entry = tk.Entry(win, width=30)
         ssid_entry.grid(row=0, column=1)
-
         tk.Label(win, text="Password:").grid(row=1, column=0, padx=10, pady=5)
         pass_entry = tk.Entry(win, width=30)
         pass_entry.grid(row=1, column=1)
@@ -156,99 +160,61 @@ class HelmetGUI:
                     code = f.read()
                 code = re.sub(r'const char\* ssid = ".*?";', f'const char* ssid = "{ssid}";', code)
                 code = re.sub(r'const char\* password = ".*?";', f'const char* password = "{pwd}";', code)
-                
                 with open(ESP_FILE_PATH, 'w', encoding='utf-8') as f:
                     f.write(code)
                 messagebox.showinfo("Saved", "WiFi credentials updated in ESP.ino")
                 win.destroy()
 
-        tk.Button(win, text="Save", command=save_wifi).grid(
-            row=2, column=0, columnspan=2, pady=10)
+        tk.Button(win, text="Save", command=save_wifi).grid(row=2, column=0, columnspan=2, pady=10)
 
     def process_log_queue(self):
-        """
-        Check the queue for new log messages and update the GUI.
-        This runs in the main GUI thread.
-        """
         try:
-            # Get all messages currently in the queue
             while True:
                 line = self.log_queue.get_nowait()
                 if line:
                     self.log_output.insert(tk.END, line)
                     self.log_output.see(tk.END)
         except queue.Empty:
-            # If the queue is empty, do nothing
             pass
-        
-        # Schedule this method to be called again after 100ms
         self.root.after(100, self.process_log_queue)
 
     def run_script(self):
-        """
-        Runs the main detection script in a separate thread and
-        sends its output to the log_queue.
-        """
-        
         if self.process:
             messagebox.showwarning("Warning", "Process is already running.")
             return
 
         def runner():
             python_executable = "python" if os.name == 'nt' else "python3"
-            
-            self.log_output.delete(1.0, tk.END) # Clear previous logs
+            self.log_output.delete(1.0, tk.END)
             self.log_output.insert(tk.END, f"--- Starting process: {python_executable} main.py ---\n")
-
             try:
-                # --- Store the process in self.process ---
                 self.process = subprocess.Popen(
                     [python_executable, "./main.py"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding='utf-8',
-                    bufsize=1  # Line-buffered
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding='utf-8', bufsize=1
                 )
-
-                # Read output line by line and put it into the queue
                 for line in iter(self.process.stdout.readline, ''):
                     self.log_queue.put(line)
-                
                 self.process.stdout.close()
                 self.process.wait()
                 self.log_queue.put("--- Process finished ---\n")
-                self.process = None # Clear process when done
-
-            except FileNotFoundError:
-                msg = f"Error: '{python_executable}' not found.\n"
-                msg += "Please ensure Python is in your system's PATH.\n"
-                msg += "You might need to change the 'python_executable' variable in gui.py.\n"
-                self.log_queue.put(msg)
                 self.process = None
             except Exception as e:
-                self.log_queue.put(f"--- An unexpected error occurred: {e} ---\n")
+                self.log_queue.put(f"--- Error: {e} ---\n")
                 self.process = None
 
-        # --- Start a non-daemon thread and store it ---
         self.runner_thread = threading.Thread(target=runner)
         self.runner_thread.start()
 
-    # --- Handles graceful shutdown ---
     def on_closing(self):
-        """Called when the user clicks the 'x' on the GUI window."""
         if self.process:
             print("[GUI] Terminating main.py subprocess...")
-            self.log_queue.put("--- Sending shutdown signal to main.py ---\n")
-            self.process.terminate() # Send SIGTERM (this triggers atexit in main.py)
-            
-            # Wait for the runner thread to finish
+            self.log_queue.put("--- Sending shutdown signal ---\n")
+            self.process.terminate()
             if self.runner_thread and self.runner_thread.is_alive():
-                self.runner_thread.join(timeout=2) # Wait max 2s
-        
+                self.runner_thread.join(timeout=2)
         print("[GUI] Closing GUI.")
         self.root.destroy()
-
 
 if __name__ == '__main__':
     root = tk.Tk()

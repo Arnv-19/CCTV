@@ -1,13 +1,17 @@
-alarm_cooldown_sec: 15
-person_image_cooldown_sec: 30
+alarm_cooldown_sec: 5
+camera_esp_ips:
+- 192.168.1.201
+- 192.168.1.3
 camera_feeds:
 - data/ROI_Person_Testing(3).mp4
+- data/ROI_Person_Testing(4).mp4
 camera_titles:
-- Camera 0
+- Testing_3
+- Testing_4
 class_file: data/class_names.yaml
 confidence_threshold: 0.5
-esp_ip: 192.168.0.231
 model_path: weights/helmet_model.pt
+person_image_cooldown_sec: 30
 person_model_path: weights/person_model.pt
 serial_port: COM4
-use_wifi: false
+use_wifi: true

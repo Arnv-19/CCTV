@@ -23,7 +23,6 @@ def load_config(path='./config/config.yaml'):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-
 def cleanup_all():
     print("[EXIT] Cleaning up resources...")
 
@@ -54,8 +53,13 @@ def cleanup_all():
     try:
         config = load_config()
         use_wifi = config.get('use_wifi', False)
-        esp_ip = config.get('esp_ip', None)
-        send_buzzer_command(False, use_wifi, esp_ip)
+        # Attempt to turn off all known ESPs
+        esp_ips = config.get('camera_esp_ips', [])
+        if use_wifi:
+            for ip in esp_ips:
+                if ip: send_buzzer_command(False, True, ip)
+        else:
+             send_buzzer_command(False, False, None) # Serial fallback
         cv2.destroyAllWindows()
     except Exception as e:
         print(f"[EXIT] Could not send buzz_off command or cv2 error: \n{e}")
@@ -131,8 +135,7 @@ def display_frames(camera_titles):
     
     window_titles = {}
     for cam_id in range(len(camera_titles)):
-        title = camera_titles[cam_id] if cam_id < len(
-            camera_titles) else f"Camera {cam_id}"
+        title = camera_titles[cam_id] if cam_id < len(camera_titles) else f"Camera {cam_id}"
         window_titles[cam_id] = title
         cv2.namedWindow(title)
         cv2.setMouseCallback(title, mouse_callback, cam_id) 
@@ -242,14 +245,18 @@ def main():
             return
 
         feeds = config['camera_feeds']
-        titles = config.get(
-            'camera_titles', [f"Camera {i}" for i in range(len(feeds))])
+        titles = config.get('camera_titles', [f"Camera {i}" for i in range(len(feeds))])
+        # Load ESP IPs list
+        esp_ips = config.get('camera_esp_ips', [])
+        
         threads = []
         
         print(f"[INFO] Found {len(feeds)} camera feeds. Starting threads...")
 
         for cam_id, stream_url in enumerate(feeds):
             print(f"[INFO] Starting thread for Camera {cam_id} with URL: {stream_url}")
+            # <--- Get the specific ESP IP for this camera --->
+            assigned_esp_ip = esp_ips[cam_id] if cam_id < len(esp_ips) else None
             
             # --- Create stop event and pass the dict ---
             thread_stop_events[cam_id] = threading.Event() # Create event for this thread
@@ -260,7 +267,8 @@ def main():
                 thread_stop_events, # Pass the whole dict
                 rois_state, roi_lock,
                 helmet_model, person_model, # Pass BOTH models
-                helmet_class, no_helmet_class
+                helmet_class, no_helmet_class,
+                assigned_esp_ip
             ))
             t.daemon = True
             t.start()
