@@ -1,8 +1,41 @@
-__pycache__
-.vscode/
-
 __pycache__/
-violations/
-logs/
-
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
 venv/
+.venv/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+
+# Logs
+logs/
+*.log
+
+# Model weights and large artifacts
+weights/
+*.pt
+*.onnx
+*.engine
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Environment / secrets
+.env
+.env.*
+.venv/
+.env/
+.venv
+# OS files
+.DS_Store
+Thumbs.db
+
+.claude
+.vscode/
