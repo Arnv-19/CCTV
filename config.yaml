@@ -1,0 +1,23 @@
+alarm_cooldown_sec: 30
+alarm_http_token: ''
+alarm_transport: usb
+camera_feeds:
+- 0
+- rtsp://admin1:admin%40123@192.168.20.103:554/cam/realmonitor?channel=1&subtype=0
+camera_titles:
+- Webcam 0
+- Camera 1
+class_file: data/class_names.yaml
+confidence_threshold: 0.25
+esp_ip: ''
+gloves_model_path: weights/best.pt
+model_path: weights/ppe_model.pt
+mqtt_broker: ''
+mqtt_client_id: skycctv-ai
+mqtt_password: ''
+mqtt_port: 1883
+mqtt_qos: 1
+mqtt_retain: false
+mqtt_topic: skycctv/alarm
+mqtt_username: ''
+use_wifi: false
