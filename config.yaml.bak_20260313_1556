@@ -3,7 +3,7 @@ alarm_http_token: ''
 alarm_transport: usb
 camera_feeds:
 - 0
-- rtsp://admin1:admin%40123@192.168.20.103:554/cam/realmonitor?channel=1&subtype=0
+- ''
 camera_titles:
 - Webcam 0
 - Camera 1
