@@ -12,6 +12,7 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
+import urllib.parse
 
 load_dotenv()
 
@@ -22,8 +23,11 @@ DB_NAME = os.getenv("DB_NAME", "skycctvai")
 DB_USER = os.getenv("DB_USER", "skycctvai_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "changeme")
 
+# Percent-encode password to safely include special characters (eg. @)
+DB_PASSWORD_QUOTED = urllib.parse.quote_plus(DB_PASSWORD) if DB_PASSWORD is not None else ""
+
 DATABASE_URL = (
-    f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    f"postgresql://{DB_USER}:{DB_PASSWORD_QUOTED}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 
 try:

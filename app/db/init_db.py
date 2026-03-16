@@ -30,8 +30,12 @@ from app.services.auth_service import hash_password
 
 def create_tables():
     if engine is None:
-        print("[init_db] ERROR: No database connection. Aborting.")
-        sys.exit(1)
+        # During development it's useful to allow the app to start even when
+        # PostgreSQL is not reachable (e.g. running without DB). The rest of
+        # the application will handle DB absence gracefully; avoid exiting
+        # the whole process from here.
+        print("[init_db] WARNING: No database connection. Skipping table creation.")
+        return
     print("[init_db] Creating tables...")
     Base.metadata.create_all(bind=engine)
     print("[init_db] Tables created.")

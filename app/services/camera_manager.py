@@ -247,9 +247,12 @@ class CameraManager:
 
         cfg = get_config()
         try:
-            self.model = load_model(cfg["model_path"])
+            model_path = cfg["model_path"]
+            model_path_abs = _resolve_local_path(model_path) if model_path else model_path
+            self.model = load_model(str(model_path_abs) if model_path_abs is not None else model_path)
             self.model_path_loaded = cfg["model_path"]
-            _, self.helmet_class, self.no_helmet_class, self.violation_classes, self.safe_classes = load_class_names(cfg["class_file"])
+            class_file_abs = _resolve_local_path(cfg["class_file"]) if cfg.get("class_file") else cfg.get("class_file")
+            _, self.helmet_class, self.no_helmet_class, self.violation_classes, self.safe_classes = load_class_names(str(class_file_abs))
             print("[CameraManager] Model loaded successfully.")
         except Exception as e:
             # Non-fatal: model will be loaded lazily on start_all()
@@ -310,9 +313,15 @@ class CameraManager:
         # Load/reload main model if missing or config changed.
         if self.model is None or self.model_path_loaded != selected_model_path:
             try:
-                self.model = load_model(selected_model_path)
+                # Resolve relative model paths to absolute paths inside the project so
+                # loading works regardless of the current working directory.
+                model_path_to_load = selected_model_path
+                if selected_model_path and not Path(selected_model_path).is_absolute():
+                    model_path_to_load = str(_resolve_local_path(selected_model_path))
+                self.model = load_model(model_path_to_load)
                 self.model_path_loaded = selected_model_path
-                _, self.helmet_class, self.no_helmet_class, self.violation_classes, self.safe_classes = load_class_names(cfg["class_file"])
+                class_file_abs = _resolve_local_path(cfg["class_file"]) if cfg.get("class_file") else cfg.get("class_file")
+                _, self.helmet_class, self.no_helmet_class, self.violation_classes, self.safe_classes = load_class_names(str(class_file_abs))
             except Exception as e:
                 raise RuntimeError(f"Failed to load model: {e}")
 
@@ -322,7 +331,8 @@ class CameraManager:
             gloves_abs = _resolve_local_path(gloves_model_path)
             if gloves_abs.exists() and self.gloves_model_path_loaded != gloves_model_path:
                 try:
-                    self.gloves_model = load_model(gloves_model_path)
+                    # Load gloves model using absolute path to avoid CWD issues.
+                    self.gloves_model = load_model(str(gloves_abs))
                     self.gloves_model_path_loaded = gloves_model_path
                     print(f"[CameraManager] Gloves model loaded: {gloves_model_path}")
                 except Exception as e:
