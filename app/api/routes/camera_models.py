@@ -11,6 +11,7 @@ GET   /api/camera-models/{camera_id}/enabled         Return only enabled model n
 
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Body
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,10 @@ router = APIRouter()
 class ModelToggle(BaseModel):
     model_name: str
     is_enabled: bool = True
+
+
+class ModelPatch(BaseModel):
+    is_enabled: bool | None = None
 
 
 def _row_dict(r: CameraModel) -> dict:
@@ -105,6 +110,7 @@ def upsert_camera_model(
 def toggle_model(
     camera_id: int,
     model_name: str,
+    body: ModelPatch | None = Body(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
@@ -118,7 +124,14 @@ def toggle_model(
     )
     if not row:
         raise HTTPException(404, f"Model '{model_name}' not configured for camera {camera_id}")
-    row.is_enabled = not row.is_enabled
+
+    # Support both forms:
+    # - PATCH with no body: toggle (used by frontend)
+    # - PATCH with {"is_enabled": ...}: set exact state
+    if body is not None and body.is_enabled is not None:
+        row.is_enabled = body.is_enabled
+    else:
+        row.is_enabled = not row.is_enabled
     row.updated_at = datetime.utcnow()
     db.commit()
 

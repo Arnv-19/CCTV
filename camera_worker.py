@@ -161,7 +161,9 @@ def camera_loop(
     _DISPLAY_NAMES: dict = {
         # Helmet / hardhat
         "NO-Hardhat":       "No Helmet",
+        "NO-Hat":           "No Helmet",
         "Hardhat":          "Helmet",
+        "Hat":              "Helmet",
         "no_helmet":        "No Helmet",
         "helmet":           "Helmet",
         # Vest
@@ -191,6 +193,9 @@ def camera_loop(
         "no-hardhat":       "helmet_detection",
         "no_hardhat":       "helmet_detection",
         "hardhat":          "helmet_detection",
+        "no-hat":           "helmet_detection",
+        "no_hat":           "helmet_detection",
+        "hat":              "helmet_detection",
 
         # Vest
         "no_vest":          "vest_detection",

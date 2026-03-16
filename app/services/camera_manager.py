@@ -457,7 +457,6 @@ class CameraManager:
             violation_classes=self.violation_classes,
             safe_classes=self.safe_classes,
             gloves_model=self.gloves_model,
-            enabled_models=_fetch_enabled_models_for_camera(cam_id),
         )
 
     def stop_camera(self, cam_id: int):
@@ -513,6 +512,9 @@ class CameraManager:
         # Stop any existing thread for this camera slot before replacing it
         if cam_id in self.stop_events:
             self.stop_events[cam_id].set()
+            old_thread = self.threads.get(cam_id)
+            if old_thread is not None and old_thread.is_alive():
+                old_thread.join(timeout=2)
 
         # Fetch DB-assigned buzzers and enabled model flags for this camera
         assigned_buzzers = _fetch_buzzers_for_camera(cam_id)
