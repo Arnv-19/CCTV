@@ -17,8 +17,8 @@ logs/
 *.log
 
 # Model weights and large artifacts
-weights/
-*.pt
+# weights/
+# *.pt
 *.onnx
 *.engine
 
