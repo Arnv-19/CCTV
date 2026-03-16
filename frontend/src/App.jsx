@@ -124,15 +124,16 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-slate-900 text-slate-100">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 py-3 bg-slate-800 border-b border-slate-700 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+      <header className="flex items-center justify-between px-3 sm:px-6 py-3 bg-slate-800 border-b border-slate-700 shrink-0 gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
             <Camera size={18} />
           </div>
-          <span className="text-lg font-bold tracking-wide">SkyCCTVAI</span>
+          <span className="text-base sm:text-lg font-bold tracking-wide">SkyCCTVAI</span>
         </div>
 
-        <div className="flex items-center gap-6 text-sm text-slate-400">
+        {/* Desktop stats — hidden on mobile */}
+        <div className="hidden md:flex items-center gap-6 text-sm text-slate-400">
           <span>{cameras.length} camera{cameras.length !== 1 ? 's' : ''}</span>
           {activeViolations > 0 && (
             <span className="text-red-400 font-semibold">
@@ -156,11 +157,21 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Mobile compact status — visible only on mobile */}
+        <div className="flex md:hidden items-center gap-2 text-xs text-slate-400 min-w-0">
+          {running
+            ? <Wifi size={13} className="text-green-400 shrink-0" />
+            : <WifiOff size={13} className="text-slate-500 shrink-0" />}
+          {activeViolations > 0 && (
+            <span className="text-red-400 font-semibold shrink-0">{activeViolations}!</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={handleStartStop}
             disabled={loading}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
               running
                 ? 'bg-red-600 hover:bg-red-700 text-white'
                 : 'bg-green-600 hover:bg-green-700 text-white'
@@ -176,13 +187,13 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tabs */}
-      <nav className="flex gap-1 px-6 pt-3 bg-slate-800 border-b border-slate-700 shrink-0">
+      {/* Tabs — horizontally scrollable on mobile */}
+      <nav className="flex gap-1 px-2 sm:px-6 pt-3 bg-slate-800 border-b border-slate-700 shrink-0 overflow-x-auto">
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => handleTabChange(id)}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap shrink-0 ${
               tab === id
                 ? 'bg-slate-900 text-blue-400 border-b-2 border-blue-400'
                 : 'text-slate-400 hover:text-slate-200'

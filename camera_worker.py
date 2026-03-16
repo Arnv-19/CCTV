@@ -37,6 +37,8 @@ _HAND_LANDMARKER_PATH = str(
 
 from alarm import send_buzzer_command
 from detector import run_detection
+from roi_module.filter import filter_detections
+from roi_module.cache import get_roi_cache
 
 
 def ensure_dir(path: str):
@@ -97,6 +99,22 @@ def fire_buzzers(buzzers: list, cam_id: int) -> bool:
         except Exception as e:
             print(f"[Camera {cam_id}] Buzzer fire error (buzzer {b.get('id')}): {e}")
     return fired
+
+
+def _get_rois_for_camera(cam_id_str: str) -> list:
+    """Return active ROIs from cache; fall back to DB on cache miss."""
+    rois = get_roi_cache().get(cam_id_str)
+    if rois is not None:
+        return rois
+    try:
+        from app.db.database import SessionLocal
+        from roi_module.service import get_camera_rois_cached
+        if SessionLocal is not None:
+            with SessionLocal() as db:
+                return get_camera_rois_cached(db, cam_id_str)
+    except Exception as e:
+        print(f"[ROI] Could not fetch ROIs for camera {cam_id_str}: {e}")
+    return []
 
 
 def camera_loop(
@@ -336,6 +354,19 @@ def camera_loop(
             if _enabled_set is not None and model_name and model_name not in _enabled_set:
                 continue
             filtered_detections.append(det)
+
+        # ── ROI spatial filter ────────────────────────────────────────────
+        # Detections outside all active ROI polygons are dropped.
+        # If no active ROIs exist, all detections pass through (allow_outside_fallback=True).
+        _rois = _get_rois_for_camera(str(cam_id))
+        if _rois:
+            # filter_detections expects x1/y1/x2/y2 keys; adapt from our "box" list
+            for _d in filtered_detections:
+                _d["x1"], _d["y1"], _d["x2"], _d["y2"] = _d["box"]
+            frame_h_px, frame_w_px = resized.shape[:2]
+            filtered_detections, _ = filter_detections(
+                filtered_detections, str(cam_id), frame_w_px, frame_h_px, rois=_rois
+            )
 
         # ── violation handling ─────────────────────────────────────────────
         violation_found = False

@@ -12,12 +12,12 @@ export default function LiveView({ cameras, running, streamEpoch, onEditROI }) {
     )
   }
 
-  // Dynamic grid: 1 cam → 1 col, 2 → 2, 3-4 → 2×2, 5+ → 3 cols
+  // Dynamic grid: 1 cam → 1 col, 2 → 1 col on mobile / 2 on sm+, 3-4 → 2×2 on sm+, 5+ → 3 cols on lg+
   const cols =
     cameras.length === 1 ? 'grid-cols-1' :
-    cameras.length === 2 ? 'grid-cols-2' :
-    cameras.length <= 4 ? 'grid-cols-2' :
-    'grid-cols-3'
+    cameras.length === 2 ? 'grid-cols-1 sm:grid-cols-2' :
+    cameras.length <= 4 ? 'grid-cols-1 sm:grid-cols-2' :
+    'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
 
   return (
     <div className={`grid ${cols} gap-2 p-3 h-full`}>

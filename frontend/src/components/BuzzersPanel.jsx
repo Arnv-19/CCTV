@@ -89,7 +89,7 @@ export default function BuzzersPanel() {
   const f = form
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-5">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-5">
       {error && (
         <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
@@ -106,7 +106,7 @@ export default function BuzzersPanel() {
       </div>
 
       {/* Buzzer list */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-x-auto">
         {buzzers.length === 0 ? (
           <div className="px-6 py-10 text-center text-slate-500 text-sm">
             No buzzers configured. Click "Add Buzzer" to create one.
