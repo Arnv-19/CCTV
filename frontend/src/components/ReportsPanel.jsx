@@ -96,7 +96,7 @@ export default function ReportsPanel() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-5">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-5">
       {error && (
         <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
@@ -115,30 +115,32 @@ export default function ReportsPanel() {
 
       {/* Filters */}
       <form onSubmit={handleFilter}
-        className="bg-slate-800 border border-slate-700 rounded-xl p-4 flex flex-wrap gap-3 items-end">
-        <div className="space-y-1">
-          <label className="text-xs text-slate-400">Camera ID</label>
-          <input className={`${inputCls} w-28`} type="number" placeholder="All"
-            value={filters.camera_id} onChange={e => setFilters({ ...filters, camera_id: e.target.value })} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-slate-400">Model</label>
-          <input className={`${inputCls} w-40`} placeholder="All"
-            value={filters.model_name} onChange={e => setFilters({ ...filters, model_name: e.target.value })} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-slate-400">From</label>
-          <input className={inputCls} type="date"
-            value={filters.date_from} onChange={e => setFilters({ ...filters, date_from: e.target.value })} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-slate-400">To</label>
-          <input className={inputCls} type="date"
-            value={filters.date_to} onChange={e => setFilters({ ...filters, date_to: e.target.value })} />
+        className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3 sm:space-y-0 sm:flex sm:flex-wrap sm:gap-3 sm:items-end">
+        <div className="grid grid-cols-2 sm:contents gap-3">
+          <div className="space-y-1">
+            <label className="text-xs text-slate-400">Camera ID</label>
+            <input className={`${inputCls} w-full sm:w-28`} type="number" placeholder="All"
+              value={filters.camera_id} onChange={e => setFilters({ ...filters, camera_id: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-400">Model</label>
+            <input className={`${inputCls} w-full sm:w-40`} placeholder="All"
+              value={filters.model_name} onChange={e => setFilters({ ...filters, model_name: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-400">From</label>
+            <input className={`${inputCls} w-full`} type="date"
+              value={filters.date_from} onChange={e => setFilters({ ...filters, date_from: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-400">To</label>
+            <input className={`${inputCls} w-full`} type="date"
+              value={filters.date_to} onChange={e => setFilters({ ...filters, date_to: e.target.value })} />
+          </div>
         </div>
         <div className="space-y-1">
           <label className="text-xs text-slate-400">Acknowledged</label>
-          <select className={`${inputCls} w-36`}
+          <select className={`${inputCls} w-full sm:w-36`}
             value={filters.acknowledged}
             onChange={e => setFilters({ ...filters, acknowledged: e.target.value })}>
             <option value="">All</option>
@@ -146,18 +148,20 @@ export default function ReportsPanel() {
             <option value="true">Acknowledged</option>
           </select>
         </div>
-        <button type="submit"
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
-          Filter
-        </button>
-        <button type="button" onClick={handleExport}
-          className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors ml-auto">
-          <Download size={14} /> Export CSV
-        </button>
+        <div className="flex gap-2 sm:contents">
+          <button type="submit"
+            className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            Filter
+          </button>
+          <button type="button" onClick={handleExport}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors sm:ml-auto">
+            <Download size={14} /> Export CSV
+          </button>
+        </div>
       </form>
 
       {/* Table */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-x-auto">
         {loading ? (
           <div className="px-6 py-10 text-center text-slate-500 text-sm">Loading...</div>
         ) : alerts.length === 0 ? (

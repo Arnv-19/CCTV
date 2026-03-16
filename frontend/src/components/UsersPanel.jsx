@@ -67,7 +67,7 @@ export default function UsersPanel() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-6">
       {error && (
         <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
@@ -79,7 +79,7 @@ export default function UsersPanel() {
         <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
           <UserPlus size={15} /> Create User
         </h3>
-        <form onSubmit={handleCreate} className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input className={inputCls} placeholder="Username" required
             value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
           <input className={inputCls} placeholder="Email" type="email" required
@@ -100,7 +100,7 @@ export default function UsersPanel() {
       </div>
 
       {/* User table */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-700/50">
             <tr className="text-left text-xs text-slate-400 uppercase tracking-wider">
@@ -158,9 +158,9 @@ export default function UsersPanel() {
 
       {/* Reset password modal */}
       {resetId !== null && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleResetPwd}
-            className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-80 space-y-4">
+            className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm space-y-4">
             <h4 className="font-semibold text-slate-200">Reset Password</h4>
             <input className={inputCls} type="password" placeholder="New password" required
               value={newPwd} onChange={e => setNewPwd(e.target.value)} autoFocus />

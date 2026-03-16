@@ -37,10 +37,10 @@ export default function LogsPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full p-4 gap-3">
+    <div className="flex flex-col h-full p-3 sm:p-4 gap-3">
       {/* Toolbar */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="text-sm text-slate-400">{logs.length} entries</span>
           <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
             <input

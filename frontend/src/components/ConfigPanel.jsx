@@ -30,8 +30,8 @@ function Section({ title, children }) {
 
 function Field({ label, children }) {
   return (
-    <div className="flex items-center gap-4">
-      <label className="w-40 text-sm text-slate-400 shrink-0">{label}</label>
+    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+      <label className="text-sm text-slate-400 sm:w-40 sm:shrink-0">{label}</label>
       <div className="flex-1">{children}</div>
     </div>
   )
@@ -211,7 +211,7 @@ export default function ConfigPanel({ onSaved }) {
   const cameraCount = (cfg.camera_feeds || []).length
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-5">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-5">
       {error && (
         <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
@@ -221,31 +221,33 @@ export default function ConfigPanel({ onSaved }) {
       {/* Cameras */}
       <Section title="Camera Streams">
         <div className="space-y-2">
-          <div className="grid grid-cols-[1fr_180px_36px] gap-2 text-xs text-slate-500 px-1">
+          <div className="hidden sm:grid sm:grid-cols-[1fr_180px_36px] gap-2 text-xs text-slate-500 px-1">
             <span>RTSP / Stream URL</span>
             <span>Title</span>
             <span />
           </div>
           {(cfg.camera_feeds || []).map((url, i) => (
-            <div key={i} className="grid grid-cols-[1fr_180px_36px] gap-2 items-center">
+            <div key={i} className="flex flex-col sm:grid sm:grid-cols-[1fr_180px_36px] gap-2 sm:items-center rounded-lg sm:rounded-none bg-slate-700/20 sm:bg-transparent p-2 sm:p-0">
               <input
                 className={inputCls}
                 value={url}
                 onChange={e => updateCamera(i, 'url', e.target.value)}
                 placeholder="rtsp://..."
               />
-              <input
-                className={inputCls}
-                value={(cfg.camera_titles || [])[i] || ''}
-                onChange={e => updateCamera(i, 'title', e.target.value)}
-                placeholder={`Camera ${i}`}
-              />
-              <button
-                onClick={() => removeCamera(i)}
-                className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
-              >
-                <Trash2 size={15} />
-              </button>
+              <div className="flex gap-2 sm:contents">
+                <input
+                  className={`${inputCls} flex-1`}
+                  value={(cfg.camera_titles || [])[i] || ''}
+                  onChange={e => updateCamera(i, 'title', e.target.value)}
+                  placeholder={`Camera ${i}`}
+                />
+                <button
+                  onClick={() => removeCamera(i)}
+                  className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors shrink-0"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             </div>
           ))}
           <button
