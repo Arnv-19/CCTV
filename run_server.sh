@@ -8,10 +8,16 @@ cd "$(dirname "$0")"
 PORT=${PORT:-8000}
 WORKERS=${WORKERS:-1}
 
+# Prefer project venv Python tools when present.
+UVICORN_BIN="uvicorn"
+if [ -x ".venv/bin/uvicorn" ]; then
+  UVICORN_BIN=".venv/bin/uvicorn"
+fi
+
 if [ "${APP_ENV:-production}" = "development" ]; then
   # Dev: single worker with hot-reload
-  uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --reload
+  "$UVICORN_BIN" app.main:app --host 0.0.0.0 --port "$PORT" --reload
 else
   # Production: no reload, configurable workers
-  uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS"
+  "$UVICORN_BIN" app.main:app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS"
 fi
