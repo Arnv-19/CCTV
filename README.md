@@ -195,7 +195,7 @@ Update `SERIAL_PORT` in `alarm.py` or set `alarm_transport: http` / `mqtt` in `c
 **Terminal 1 — FastAPI backend:**
 ```bash
 ./run_server.sh
-# or: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# or: .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **Terminal 2 — React dev server:**
@@ -209,7 +209,7 @@ npm run dev
 
 ```bash
 cd frontend && npm run build        # outputs to frontend/dist/
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 # FastAPI serves the React build from frontend/dist/ at /
 ```
 

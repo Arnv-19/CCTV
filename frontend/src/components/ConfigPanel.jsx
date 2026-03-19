@@ -98,9 +98,11 @@ function CameraBuzzers({ camId, allBuzzers }) {
 
 
 // ── Per-camera model toggles sub-component ────────────────────────────────────
-function CameraModels({ camId }) {
-  const [models, setModels] = useState({})  // { model_name: { id, is_enabled } }
-  const [saving, setSaving] = useState(null)
+function CameraModels({ camId, canEdit }) {
+  const [models,  setModels]  = useState({})   // { model_name: { id, is_enabled } }
+  const [loading, setLoading] = useState(true) // blocks clicks until first fetch completes
+  const [saving,  setSaving]  = useState(null)
+  const [error,   setError]   = useState(null)
 
   const fetchModels = useCallback(async () => {
     try {
@@ -108,44 +110,77 @@ function CameraModels({ camId }) {
       const map = {}
       for (const r of rows) map[r.model_name] = { id: r.id, is_enabled: r.is_enabled }
       setModels(map)
-    } catch {}
+      setError(null)
+    } catch (e) {
+      setError(e?.message || 'Failed to load model state')
+    } finally {
+      setLoading(false)
+    }
   }, [camId])
 
   useEffect(() => { fetchModels() }, [fetchModels])
 
   const handleToggle = async (modelName) => {
+    if (!canEdit || loading) return
+
+    setError(null)
     setSaving(modelName)
     try {
       const existing = models[modelName]
       if (existing) {
+        // Row exists in DB — flip its current state
         await api.toggleCameraModel(camId, modelName)
       } else {
-        // Missing row means implicit default is enabled; first toggle should disable it.
+        // No DB row yet (implicit enabled default) — first click disables it
         await api.upsertCameraModel(camId, modelName, false)
       }
       await fetchModels()
-    } catch (e) { console.error(e) }
-    finally { setSaving(null) }
+    } catch (e) {
+      console.error(e)
+      setError(e?.message || 'Failed to update model state')
+    }
+    finally {
+      setSaving(null)
+    }
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {KNOWN_MODELS.map(name => {
-        const info    = models[name]
-        const enabled = info ? info.is_enabled : true  // default enabled if not in DB
-        return (
-          <button key={name} onClick={() => handleToggle(name)} type="button"
-            disabled={saving === name}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-              enabled
-                ? 'bg-green-900/40 text-green-300 hover:bg-green-800/50'
-                : 'bg-slate-700 text-slate-500 hover:bg-slate-600'
-            } disabled:opacity-40`}>
-            <Cpu size={10} />
-            {name}
-          </button>
-        )
-      })}
+    <div className="space-y-2">
+      {loading && (
+        <p className="text-xs text-slate-500 animate-pulse">Loading models…</p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {KNOWN_MODELS.map(name => {
+          const info = models[name]
+          const enabled = info ? info.is_enabled : true  // default enabled if not in DB
+          const busy = saving === name
+          return (
+            <button
+              key={name}
+              onClick={() => handleToggle(name)}
+              type="button"
+              disabled={busy || !canEdit || loading}
+              title={canEdit ? '' : 'Only admin users can change model toggles'}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                enabled
+                  ? 'bg-green-900/40 text-green-300 hover:bg-green-800/50'
+                  : 'bg-slate-700 text-slate-500 hover:bg-slate-600'
+              } ${!canEdit || loading ? 'cursor-not-allowed opacity-60' : ''} disabled:opacity-40`}
+            >
+              <Cpu size={10} />
+              {busy ? '…' : name}
+            </button>
+          )
+        })}
+      </div>
+
+      {!canEdit && (
+        <p className="text-xs text-amber-400">Only admin users can edit model toggles.</p>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-400">{error}</p>
+      )}
     </div>
   )
 }
@@ -347,7 +382,7 @@ export default function ConfigPanel({ onSaved }) {
                 <div className="text-xs font-semibold text-slate-400 mb-1.5">
                   {(cfg.camera_titles || [])[i] || `Camera ${i}`}
                 </div>
-                <CameraModels camId={i} />
+                <CameraModels camId={i} canEdit={isAdmin} />
               </div>
             ))}
           </div>
