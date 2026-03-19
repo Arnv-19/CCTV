@@ -178,12 +178,12 @@ def camera_loop(
     # Keys are the raw class names the model emits; values are what is shown on screen.
     _DISPLAY_NAMES: dict = {
         # Helmet / hardhat
-        "NO-Hardhat":       "No Helmet",
-        "NO-Hat":           "No Helmet",
-        "Hardhat":          "Helmet",
-        "Hat":              "Helmet",
-        "no_helmet":        "No Helmet",
-        "helmet":           "Helmet",
+        "NO-Hardhat":       "NH",
+        "NO-Hat":           "NH",
+        "Hardhat":          "",
+        "Hat":              "",
+        "no_helmet":        "NH",
+        "helmet":           "",
         # Vest
         "NO-Safety Vest":   "No Vest",
         "Safety Vest":      "Vest",
@@ -421,11 +421,27 @@ def camera_loop(
             x1, y1, x2, y2 = map(int, det["box"])
             class_name = det["class"]
             display_name = _DISPLAY_NAMES.get(class_name, class_name)
-            label = f"{display_name.upper()} {det['conf']:.2f}"
+
+            # Normalize helmet label variants so "No Hat/No Hardhat" is always NH,
+            # and compliant helmet detections show no text.
+            cls_key = str(class_name).strip().lower().replace("_", "-").replace(" ", "-")
+            if any(k in cls_key for k in ("helmet", "hardhat", "-hat", "hat")):
+                if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
+                    display_name = "NH"
+                else:
+                    display_name = ""
+
+            if not display_name:
+                label = ""
+            elif display_name.upper() == "NH":
+                label = "NH"
+            else:
+                label = f"{display_name.upper()} {det['conf']:.2f}"
             color = (0, 255, 0) if class_name in _safe_set else (0, 0, 255)
             cv2.rectangle(resized, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(resized, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            if label:
+                cv2.putText(resized, label, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         # ── hand bounding boxes via MediaPipe + gloves classification ────────
         if _run_gloves and _mp_hands is not None:
