@@ -429,7 +429,8 @@ def camera_loop(
                 if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
                     display_name = "NH"
                 else:
-                    display_name = ""
+                    # Compliant helmet — skip box and label entirely
+                    continue
 
             if not display_name:
                 label = ""
