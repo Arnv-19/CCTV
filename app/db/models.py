@@ -4,12 +4,14 @@ app/db/models.py
 SQLAlchemy ORM models for all database tables.
 
 Tables:
-  users          — application users with roles (admin | operator)
-  buzzers        — physical alarm devices (USB / HTTP / MQTT / GPIO)
-  camera_buzzers — many-to-many: which buzzers fire for each camera
-  camera_models  — per-camera AI model enable/disable flags
-  alerts         — violation event log with snapshot, ack status
+  users               — application users with roles (admin | operator)
+  buzzers             — physical alarm devices (USB / HTTP / MQTT / GPIO)
+  camera_buzzers      — many-to-many: which buzzers fire for each camera
+  camera_models       — per-camera AI model enable/disable flags
+  alerts              — violation event log with snapshot, ack status
+  burglar_alarm_events — dedicated log for zone-entry burglar alarm triggers
 """
+
 
 import uuid
 from datetime import datetime
@@ -19,6 +21,36 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.db.database import Base
+
+
+class BurglarAlarmConfig(Base):
+    """
+    Per-camera burglar alarm configuration.
+
+    The alarm fires when:
+      1. alarm_enabled is True
+      2. Current local time is within [alarm_start_time, alarm_end_time]
+      3. A "Person" class is detected inside the monitored zone
+         (or any active ROI if monitored_zone_id is NULL)
+
+    Time strings are stored as "HH:MM" (24-hour).
+    Overnight windows (e.g. "20:00" → "05:00") are supported.
+    """
+    __tablename__ = "burglar_alarm_configs"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    camera_id           = Column(Integer, unique=True, nullable=False, index=True)
+    alarm_enabled       = Column(Boolean, default=True, nullable=False)
+    alarm_start_time    = Column(String(5), nullable=False, default="20:00")  # "HH:MM"
+    alarm_end_time      = Column(String(5), nullable=False, default="06:00")  # "HH:MM"
+    # If set, only trigger when person is inside this specific ROI zone (UUID).
+    # NULL means "any active ROI" (or all detections if no ROIs configured).
+    monitored_zone_id   = Column(String(36), nullable=True)
+    cooldown_sec        = Column(Integer, default=30, nullable=False)
+    created_at          = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at          = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 class User(Base):
@@ -111,6 +143,62 @@ class Alert(Base):
         "User", back_populates="acknowledged_alerts", foreign_keys=[acknowledged_by]
     )
 
+class BurglarAlarmEvent(Base):
+    """
+    Dedicated log table for burglar alarm zone-entry events.
+
+    Written by the AlertWriter thread whenever the burglar alarm fires
+    (person detected inside the monitored zone during the active window).
+
+    Fields
+    ------
+    camera_id           — camera that detected the intruder
+    zone_id             — ROI zone UUID that was entered (NULL = whole frame)
+    confidence_score    — YOLO detection confidence at trigger time
+    snapshot_path       — path to the saved JPEG snapshot
+    buzzer_activated    — True if a buzzer was fired
+    tracker_initialized — True if KCF tracker was started successfully
+    triggered_at        — UTC timestamp of the event
+
+    Person location (pixel coords in the resized 640×480 frame)
+    bbox_x1, bbox_y1    — top-left corner of the detected person
+    bbox_x2, bbox_y2    — bottom-right corner
+    frame_width         — frame width at detection time (pixels)
+    frame_height        — frame height at detection time (pixels)
+
+    acknowledged        — True once an operator has reviewed it
+    acknowledged_by     — FK to the User who acknowledged (nullable)
+    acknowledged_at     — UTC timestamp of acknowledgement (nullable)
+    """
+    __tablename__ = "burglar_alarm_events"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    camera_id            = Column(Integer, nullable=False, index=True)
+    zone_id              = Column(String(36), nullable=True)   # ROI uuid or NULL
+    confidence_score     = Column(Float, nullable=False, default=0.0)
+    snapshot_path        = Column(Text, nullable=True)
+    buzzer_activated     = Column(Boolean, default=False, nullable=False)
+    tracker_initialized  = Column(Boolean, default=False, nullable=False)
+    triggered_at         = Column(
+        DateTime, default=datetime.utcnow, nullable=False, index=True
+    )
+
+    # Person bounding box at the moment of detection (pixel coords)
+    bbox_x1      = Column(Integer, nullable=True)
+    bbox_y1      = Column(Integer, nullable=True)
+    bbox_x2      = Column(Integer, nullable=True)
+    bbox_y2      = Column(Integer, nullable=True)
+    frame_width  = Column(Integer, nullable=True)   # 640 normally
+    frame_height = Column(Integer, nullable=True)   # 480 normally
+
+    # Acknowledgement
+    acknowledged    = Column(Boolean, default=False, nullable=False, index=True)
+    acknowledged_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+
+    acknowledger = relationship(
+        "User", foreign_keys=[acknowledged_by]
+    )
 
 class ROI(Base):
     """Polygon zone per camera — detections outside all active ROIs are dropped."""

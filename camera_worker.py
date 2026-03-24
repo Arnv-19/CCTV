@@ -22,6 +22,8 @@ in camera_manager) so DB writes never slow down frame processing.
 import cv2
 import time
 import os
+import sys
+import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +41,11 @@ from alarm import send_buzzer_command
 from detector import run_detection
 from roi_module.filter import filter_detections
 from roi_module.cache import get_roi_cache
-
+from app.services.burglar_alarm_service import (
+    is_in_alarm_window,
+    is_person_in_zone,
+    init_kcf_tracker,
+)
 
 def ensure_dir(path: str):
     """Create a directory (and parents) if it does not already exist."""
@@ -101,6 +107,27 @@ def fire_buzzers(buzzers: list, cam_id: int) -> bool:
     return fired
 
 
+
+def play_test_sound(cam_id: int):
+    """
+    Play a short non-blocking local machine sound for burglar alarm testing.
+    Best-effort only: failures are logged and ignored.
+    """
+    try:
+        if sys.platform == "darwin":
+            sound_path = "/System/Library/Sounds/Ping.aiff"
+            subprocess.Popen(
+                ["afplay", sound_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+
+        # Fallback for other platforms: terminal bell (may be muted by terminal settings)
+        print("\a", end="", flush=True)
+    except Exception as e:
+        print(f"[Camera {cam_id}] Test sound failed: {e}")
+
 def _get_rois_for_camera(cam_id_str: str) -> list:
     """Return active ROIs from cache; fall back to DB on cache miss."""
     rois = get_roi_cache().get(cam_id_str)
@@ -151,6 +178,9 @@ def camera_loop(
     violation_classes: list = None, # PPE classes that trigger an alarm
     safe_classes: list = None,      # PPE classes shown with green bounding box
     gloves_model = None,            # optional second model for gloves/bare-hands detection
+    burglar_person_model = None,    # optional dedicated person detector for burglar alarm
+    burglar_alarm_config: dict = None,  # pre-fetched burglar alarm config dict (or None)
+    burglar_test_sound: bool = False, 
 ):
     """
     Main per-camera loop. Blocks until the stream ends or stop_event is set.
@@ -293,7 +323,21 @@ def camera_loop(
     last_alarm_time = 0
     reconnect_attempts = 0
     max_reconnect_attempts = 10
+    last_burglar_alarm_time = 0   # separate cooldown for burglar alarm events
+
     RESIZE_DIM = (640, 480)
+
+     # ── KCF tracker state for burglar alarm ───────────────────────────────
+    ba_tracker           = None   # cv2.TrackerKCF instance, or None when idle
+    ba_tracking          = False  # True while KCF is actively tracking an intruder
+    ba_track_fail_count  = 0      # consecutive KCF update failures
+    BA_MAX_FAILS         = 5      # failures before dropping back to IDLE
+    BA_REDETECT_INTERVAL = 30     # frames between zone re-checks while tracking
+    ba_frames_since_check = 0     # counter for the re-check interval
+    ba_tracked_conf      = 0.0   # confidence of the initial YOLO detection
+    ba_last_saved_bbox   = None   # [x1, y1, x2, y2] of last DB event for IoU dedup
+    BA_IoU_THRESHOLD     = 0.3    # if IoU > this, same person — skip event
+
 
     set_stats("connecting", 0, violations, frame_count)
 
@@ -341,6 +385,36 @@ def camera_loop(
         frame_count += 1
         start = time.time()
         resized = cv2.resize(frame, RESIZE_DIM)
+
+        def _is_burglar_person_class(class_name: str) -> bool:
+            if not class_name:
+                return False
+            return class_name.strip().lower() in {"person", "persona", "human"}
+
+        def _compute_iou(box1, box2):
+            """
+            Compute Intersection over Union for two bboxes [x1, y1, x2, y2].
+            Returns float in [0, 1]. Returns 0.0 if either box is None.
+            """
+            if box1 is None or box2 is None:
+                return 0.0
+            x1_1, y1_1, x2_1, y2_1 = box1
+            x1_2, y1_2, x2_2, y2_2 = box2
+            # Intersection
+            xi1, yi1 = max(x1_1, x1_2), max(y1_1, y1_2)
+            xi2, yi2 = min(x2_1, x2_2), min(y2_1, y2_2)
+            if xi2 < xi1 or yi2 < yi1:
+                inter_area = 0.0
+            else:
+                inter_area = (xi2 - xi1) * (yi2 - yi1)
+            # Union
+            area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+            area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+            union_area = area1 + area2 - inter_area
+            if union_area <= 0:
+                return 0.0
+            return inter_area / union_area
+
 
         detections = run_detection(model, resized, threshold)
         # Gloves model — only run if gloves_detection is enabled for this camera
@@ -415,6 +489,179 @@ def camera_loop(
 
                     log_violation_file(cam_id, frame_count, (violations / frame_count) * 100)
                 break   # one violation event per frame
+        
+
+        # ── burglar alarm check (with KCF tracking) ───────────────────────
+        # State machine:
+        #   IDLE     → YOLO detects person in zone+window → init KCF, fire alarm
+        #   TRACKING → KCF follows intruder each frame, skipping heavy YOLO
+        #   TRACKING → KCF fails BA_MAX_FAILS times → back to IDLE
+        #   TRACKING → zone re-check every BA_REDETECT_INTERVAL frames;
+        #              person left zone → back to IDLE
+        #   Any state → window closes → reset to IDLE immediately
+        if burglar_alarm_config and burglar_alarm_config.get("alarm_enabled"):
+            ba_cooldown = float(burglar_alarm_config.get("cooldown_sec", 30))
+            start_t = burglar_alarm_config.get("alarm_start_time", "20:00")
+            end_t   = burglar_alarm_config.get("alarm_end_time",   "06:00")
+            window_active = is_in_alarm_window(start_t, end_t)
+
+            # Reset tracker immediately when the time window closes
+            if not window_active and ba_tracking:
+                ba_tracker   = None
+                ba_tracking  = False
+                ba_track_fail_count  = 0
+                ba_frames_since_check = 0
+                ba_last_saved_bbox = None  # clear session on window close
+                print(f"[Camera {cam_id}] KCF tracker reset — alarm window closed")
+
+            if window_active:
+                frame_h_px, frame_w_px = resized.shape[:2]
+                zone_pts = burglar_alarm_config.get("monitored_zone_points")
+
+                if ba_tracking and ba_tracker is not None:
+                    # ── TRACKING STATE: update KCF ─────────────────────────
+                    kcf_ok, kcf_rect = ba_tracker.update(resized)
+
+                    if not kcf_ok:
+                        ba_track_fail_count += 1
+                        if ba_track_fail_count >= BA_MAX_FAILS:
+                            ba_tracker  = None
+                            ba_tracking = False
+                            ba_track_fail_count  = 0
+                            ba_frames_since_check = 0
+                            ba_last_saved_bbox = None  # reset session on tracker loss
+                            print(
+                                f"[Camera {cam_id}] KCF lost intruder after "
+                                f"{BA_MAX_FAILS} failures — returning to IDLE"
+                            )
+                    else:
+                        ba_track_fail_count = 0
+                        kx, ky, kw, kh = [int(v) for v in kcf_rect]
+                        kx2, ky2 = kx + kw, ky + kh
+
+                        # Periodic zone re-check — drop tracker if person left zone
+                        ba_frames_since_check += 1
+                        if ba_frames_since_check >= BA_REDETECT_INTERVAL:
+                            ba_frames_since_check = 0
+                            tracked_det = {"box": [kx, ky, kx2, ky2]}
+                            still_in_zone = (
+                                zone_pts is None
+                                or is_person_in_zone(
+                                    tracked_det, zone_pts, frame_w_px, frame_h_px
+                                )
+                            )
+                            if not still_in_zone:
+                                ba_tracker  = None
+                                ba_tracking = False
+                                ba_track_fail_count  = 0
+                                ba_last_saved_bbox = None  # reset session on zone exit
+                                print(
+                                    f"[Camera {cam_id}] KCF — intruder left zone, "
+                                    "tracker reset to IDLE"
+                                )
+
+                        # Draw orange tracking box while KCF is active
+                        if ba_tracking:
+                            cv2.rectangle(
+                                resized, (kx, ky), (kx2, ky2), (0, 165, 255), 2
+                            )
+                            cv2.putText(
+                                resized,
+                                f"INTRUDER TRACKING {ba_tracked_conf:.2f}",
+                                (kx, ky - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2,
+                            )
+
+                else:
+                    # ── IDLE STATE: run YOLO person detection ──────────────
+                    if (time.time() - last_burglar_alarm_time) > ba_cooldown:
+                        burglar_candidates = filtered_detections
+                        if burglar_person_model is not None:
+                            burglar_candidates = run_detection(
+                                burglar_person_model, resized, threshold
+                            )
+
+                        for det in burglar_candidates:
+                            if not _is_burglar_person_class(det.get("class")):
+                                continue
+
+                            in_zone = (
+                                zone_pts is None
+                                or is_person_in_zone(
+                                    det, zone_pts, frame_w_px, frame_h_px
+                                )
+                            )
+                            if not in_zone:
+                                continue
+
+                            # ── IoU deduplication: check if same person as last event ─
+                            det_bbox = det["box"]
+                            iou_with_last = _compute_iou(det_bbox, ba_last_saved_bbox)
+                            if iou_with_last > BA_IoU_THRESHOLD:
+                                # Same person still in frame, skip event
+                                continue
+
+                            # Intruder confirmed — initialize KCF tracker
+                            new_tracker = init_kcf_tracker(resized, det_bbox)
+                            if new_tracker is not None:
+                                ba_tracker            = new_tracker
+                                ba_tracking           = True
+                                ba_track_fail_count   = 0
+                                ba_frames_since_check = 0
+                                ba_tracked_conf       = det["conf"]
+
+                            # Fire alarm + save snapshot + queue alert
+                            last_burglar_alarm_time = time.time()
+                            snap_path = save_snapshot(resized, cam_id, snapshot_dir)
+
+                            buzzer_fired = False
+                            if assigned_buzzers:
+                                buzzer_fired = fire_buzzers(assigned_buzzers, cam_id)
+                            else:
+                                from alarm import trigger_alarm
+                                trigger_alarm(
+                                    cam_id, ba_cooldown,
+                                    use_wifi=use_wifi, esp_ip=esp_ip,
+                                    transport=alarm_transport, token=alarm_http_token,
+                                    mqtt_broker=mqtt_broker, mqtt_port=mqtt_port,
+                                    mqtt_username=mqtt_username, mqtt_password=mqtt_password,
+                                    mqtt_topic=mqtt_topic, mqtt_client_id=mqtt_client_id,
+                                    mqtt_qos=mqtt_qos, mqtt_retain=mqtt_retain,
+                                )
+                                buzzer_fired = True
+
+                            if burglar_test_sound:
+                                play_test_sound(cam_id)
+
+                            if alert_queue is not None:
+                                _box = det_bbox
+                                alert_queue.put({
+                                    "camera_id":           cam_id,
+                                    "model_name":          "burglar_alarm",
+                                    "violation_type":      "burglar_alarm",
+                                    "confidence_score":    det["conf"],
+                                    "snapshot_path":       snap_path,
+                                    "buzzer_activated":    buzzer_fired,
+                                    "zone_id":             burglar_alarm_config.get("monitored_zone_id"),
+                                    "tracker_initialized": ba_tracking,
+                                    # Person location in frame
+                                    "bbox_x1":     int(_box[0]),
+                                    "bbox_y1":     int(_box[1]),
+                                    "bbox_x2":     int(_box[2]),
+                                    "bbox_y2":     int(_box[3]),
+                                    "frame_width":  frame_w_px,
+                                    "frame_height": frame_h_px,
+                                })
+                                # Update last saved bbox for next iteration's IoU check
+                                ba_last_saved_bbox = list(_box)
+
+                            print(
+                                f"[Camera {cam_id}] BURGLAR ALARM — intruder detected "
+                                f"in zone ({start_t}–{end_t}), KCF tracker started "
+                                f"(conf={det['conf']:.2f}, IoU={iou_with_last:.2f})"
+                            )
+                            break   # one burglar event per frame
+
 
         # ── draw detections (filtered by enabled per-camera models) ────────
         for det in filtered_detections:

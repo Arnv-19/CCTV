@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import {
   Camera, Settings, FileText, Bell, Play, Square,
-  Wifi, WifiOff, BarChart2, BellRing, Users, LogOut, X,
+  Wifi, WifiOff, BarChart2, BellRing, Users, LogOut, X,ShieldAlert
 } from 'lucide-react'
 import { useAuth } from './contexts/AuthContext'
 import { api } from './api/client'
@@ -21,6 +21,8 @@ import ReportsPanel  from './components/ReportsPanel'
 import BuzzersPanel  from './components/BuzzersPanel'
 import UsersPanel    from './components/UsersPanel'
 import ROIEditorPage from './components/ROIEditorPage'
+import BurglarAlarmPanel  from './components/BurglarAlarmPanel'
+
 
 function buildTabs(isAdmin) {
   const tabs = [
@@ -29,6 +31,8 @@ function buildTabs(isAdmin) {
     { id: 'reports', label: 'Reports',        Icon: BarChart2 },
     { id: 'logs',    label: 'Logs',           Icon: FileText  },
     { id: 'alarm',   label: 'Alarm',          Icon: Bell      },
+    { id: 'burglar', label: 'Burglar Alarm',  Icon: ShieldAlert  },
+
   ]
   if (isAdmin) {
     tabs.push(
@@ -221,6 +225,7 @@ export default function App() {
         {tab === 'reports' && <ReportsPanel />}
         {tab === 'logs'    && <LogsPanel />}
         {tab === 'alarm'   && <AlarmPanel onTest={() => showToast('Alarm triggered')} />}
+        {tab === 'burglar' && <BurglarAlarmPanel />}
         {tab === 'buzzers' && isAdmin && <BuzzersPanel />}
         {tab === 'users'   && isAdmin && <UsersPanel />}
       </main>

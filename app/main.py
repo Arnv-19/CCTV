@@ -22,6 +22,7 @@ from app.api.routes import cameras, config_routes, alarm, logs, stream
 
 # New routes
 from app.api.routes import auth, users, buzzers, camera_buzzers, camera_models, alerts as alerts_router, rois
+from app.api.routes import burglar_alarm as burglar_alarm_router
 
 
 class SafeStaticFiles(StaticFiles):
@@ -82,6 +83,11 @@ app.include_router(camera_buzzers.router,  prefix="/api/camera-buzzers",  tags=[
 app.include_router(camera_models.router,   prefix="/api/camera-models",   tags=["camera-models"])
 app.include_router(alerts_router.router,   prefix="/api/alerts",          tags=["alerts"])
 app.include_router(rois.router,            prefix="/api/rois",            tags=["rois"])
+
+# app.include_router(alerts_router.router,        prefix="/api/alerts",          tags=["alerts"])
+# app.include_router(rois.router,                 prefix="/api/rois",            tags=["rois"])
+app.include_router(burglar_alarm_router.router, prefix="/api/burglar-alarm",   tags=["burglar-alarm"])
+
 
 # ── Serve React production build ──────────────────────────────────────────
 frontend_build = Path(__file__).parent.parent / "frontend" / "dist"
