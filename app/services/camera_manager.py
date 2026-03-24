@@ -38,6 +38,7 @@ from app.config import get_config
 from detector import load_model, load_class_names
 from alarm import init_serial, close_serial
 from camera_worker import camera_loop
+from app.services.burglar_alarm_service import fetch_burglar_config
 
 # Sentinel value pushed to alert_queue to signal AlertWriter to stop
 _STOP_SENTINEL = None
@@ -160,7 +161,7 @@ def _alert_writer_loop(queue: Queue):
     """
     try:
         from app.db.database import SessionLocal
-        from app.db.models import Alert
+        from app.db.models import Alert,BurglarAlarmEvent
     except Exception as e:
         print(f"[AlertWriter] Import error — DB writes disabled: {e}")
         return
@@ -178,16 +179,47 @@ def _alert_writer_loop(queue: Queue):
             if SessionLocal is None:
                 continue
             with SessionLocal() as db:
-                alert = Alert(
-                    camera_id        = item["camera_id"],
-                    model_name       = item.get("model_name", "helmet_detection"),
-                    violation_type   = item.get("violation_type", "no_helmet"),
-                    confidence_score = item.get("confidence_score", 0.0),
-                    snapshot_path    = item.get("snapshot_path"),
-                    triggered_at     = datetime.utcnow(),
-                    buzzer_activated = item.get("buzzer_activated", False),
-                )
-                db.add(alert)
+                # alert = Alert(
+                #     camera_id        = item["camera_id"],
+                #     model_name       = item.get("model_name", "helmet_detection"),
+                #     violation_type   = item.get("violation_type", "no_helmet"),
+                #     confidence_score = item.get("confidence_score", 0.0),
+                #     snapshot_path    = item.get("snapshot_path"),
+                #     triggered_at     = datetime.utcnow(),
+                #     buzzer_activated = item.get("buzzer_activated", False),
+                # )
+                # db.add(alert)
+                if item.get("model_name") == "burglar_alarm":
+                    # ── Burglar alarm event → dedicated table ──────────────
+                    event = BurglarAlarmEvent(
+                        camera_id           = item["camera_id"],
+                        zone_id             = item.get("zone_id"),
+                        confidence_score    = item.get("confidence_score", 0.0),
+                        snapshot_path       = item.get("snapshot_path"),
+                        buzzer_activated    = item.get("buzzer_activated", False),
+                        tracker_initialized = item.get("tracker_initialized", False),
+                        triggered_at        = datetime.utcnow(),
+                        # Person bounding box
+                        bbox_x1      = item.get("bbox_x1"),
+                        bbox_y1      = item.get("bbox_y1"),
+                        bbox_x2      = item.get("bbox_x2"),
+                        bbox_y2      = item.get("bbox_y2"),
+                        frame_width  = item.get("frame_width"),
+                        frame_height = item.get("frame_height"),
+                    )
+                    db.add(event)
+                else:
+                    # ── PPE / fire / other violation → alerts table ────────
+                    alert = Alert(
+                        camera_id        = item["camera_id"],
+                        model_name       = item.get("model_name", "helmet_detection"),
+                        violation_type   = item.get("violation_type", "no_helmet"),
+                        confidence_score = item.get("confidence_score", 0.0),
+                        snapshot_path    = item.get("snapshot_path"),
+                        triggered_at     = datetime.utcnow(),
+                        buzzer_activated = item.get("buzzer_activated", False),
+                    )
+                    db.add(alert)
                 db.commit()
         except Exception as e:
             print(f"[AlertWriter] Failed to write alert to DB: {e}")
@@ -208,6 +240,9 @@ class CameraManager:
         # Shared YOLO model (loaded once, reused across all camera threads)
         self.model = None
         self.model_path_loaded: str | None = None
+        # Dedicated person model used by burglar alarm tracking
+        self.person_model = None
+        self.person_model_path_loaded: str | None = None
         # Optional second model for gloves/bare-hands detection
         self.gloves_model = None
         self.gloves_model_path_loaded: str | None = None
@@ -324,6 +359,24 @@ class CameraManager:
                 _, self.helmet_class, self.no_helmet_class, self.violation_classes, self.safe_classes = load_class_names(str(class_file_abs))
             except Exception as e:
                 raise RuntimeError(f"Failed to load model: {e}")
+        
+        # Load dedicated person model for burglar alarm detection.
+        person_model_path = cfg.get("person_model_path", "weights/person_model.pt")
+        person_abs = _resolve_local_path(person_model_path) if person_model_path else None
+        if person_abs and person_abs.exists():
+            if self.person_model is None or self.person_model_path_loaded != person_model_path:
+                try:
+                    self.person_model = load_model(str(person_abs))
+                    self.person_model_path_loaded = person_model_path
+                    print(f"[CameraManager] Person model loaded: {person_model_path}")
+                except Exception as e:
+                    print(f"[CameraManager] Warning: could not load person model '{person_model_path}': {e}")
+                    self.person_model = None
+                    self.person_model_path_loaded = None
+        else:
+            print(f"[CameraManager] Warning: person model not found: {person_model_path}")
+            self.person_model = None
+            self.person_model_path_loaded = None
 
         # Load optional gloves model if configured and present.
         gloves_model_path = cfg.get("gloves_model_path", "")
@@ -360,6 +413,8 @@ class CameraManager:
         mqtt_retain       = cfg.get("mqtt_retain", False)
         cooldown          = cfg.get("alarm_cooldown_sec", 5)
         threshold         = cfg.get("confidence_threshold", 0.25)
+        burglar_test_sound = cfg.get("burglar_test_sound", False)
+
 
         started_any = False
         for cam_id, url in enumerate(feeds):
@@ -388,6 +443,8 @@ class CameraManager:
                 violation_classes=self.violation_classes,
                 safe_classes=self.safe_classes,
                 gloves_model=self.gloves_model,
+                person_model=self.person_model,
+                burglar_test_sound=burglar_test_sound,
             )
             started_any = True
 
@@ -403,6 +460,8 @@ class CameraManager:
                 violation_classes=self.violation_classes,
                 safe_classes=self.safe_classes,
                 gloves_model=self.gloves_model,
+                person_model=self.person_model,
+                burglar_test_sound=burglar_test_sound,
             )
         else:
             self.runtime_fallbacks["source_fallback"] = False
@@ -458,6 +517,7 @@ class CameraManager:
             safe_classes=self.safe_classes,
             gloves_model=self.gloves_model,
             enabled_models=_fetch_enabled_models_for_camera(cam_id),
+            
 
         )
 
@@ -501,7 +561,9 @@ class CameraManager:
         alarm_transport, alarm_http_token,
         mqtt_broker, mqtt_port, mqtt_username, mqtt_password,
         mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
-        violation_classes=None, safe_classes=None, gloves_model=None,
+        # violation_classes=None, safe_classes=None, gloves_model=None,
+        violation_classes=None, safe_classes=None, gloves_model=None, person_model=None,
+        burglar_test_sound=False,
     ):
         """
         Internal: create and start a camera thread.
@@ -521,6 +583,8 @@ class CameraManager:
         # Fetch DB-assigned buzzers and enabled model flags for this camera
         assigned_buzzers = _fetch_buzzers_for_camera(cam_id)
         enabled_models   = _fetch_enabled_models_for_camera(cam_id)
+        burglar_alarm_cfg   = fetch_burglar_config(cam_id)
+
 
         stop_event = threading.Event()
         self.stop_events[cam_id] = stop_event
@@ -555,6 +619,9 @@ class CameraManager:
                 violation_classes=violation_classes or self.violation_classes,
                 safe_classes=safe_classes or self.safe_classes,
                 gloves_model=gloves_model if gloves_model is not None else self.gloves_model,
+                burglar_person_model=person_model if person_model is not None else self.person_model,
+                burglar_alarm_config=burglar_alarm_cfg,
+                burglar_test_sound=bool(burglar_test_sound),
             ),
             daemon=True,   # thread exits automatically when the main process does
         )

@@ -34,10 +34,13 @@ class ConfigUpdate(BaseModel):
 
     # YOLOv8 model
     model_path: Optional[str] = None
+    person_model_path: Optional[str] = None
     confidence_threshold: Optional[float] = None
 
     # Alarm rate limiting
     alarm_cooldown_sec: Optional[int] = None
+    burglar_test_sound: Optional[bool] = None
+
 
     # Legacy backward-compat keys (still supported)
     esp_ip: Optional[str] = None

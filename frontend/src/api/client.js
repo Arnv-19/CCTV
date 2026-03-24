@@ -144,6 +144,15 @@ export const api = {
   testAlarm:      () => req('POST', '/alarm/test'),
   getAlarmStatus: () => req('GET', '/alarm/status'),
 
+
+    // ── Burglar Alarm ─────────────────────────────────────────────────────
+  getBurglarAlarmConfigs:  ()           => req('GET',    '/burglar-alarm/'),
+  getBurglarAlarmConfig:   (camId)      => req('GET',    `/burglar-alarm/${camId}`),
+  upsertBurglarAlarmConfig:(camId, body)=> req('PUT',    `/burglar-alarm/${camId}`, body),
+  deleteBurglarAlarmConfig:(camId)      => req('DELETE', `/burglar-alarm/${camId}`),
+  getBurglarAlarmStatus:   (camId)      => req('GET',    `/burglar-alarm/${camId}/status`),
+
+
   // ── Logs ──────────────────────────────────────────────────────────────
   getLogs:   (lines = 100) => req('GET', `/logs/?lines=${lines}`),
   clearLogs: () => req('DELETE', '/logs/'),

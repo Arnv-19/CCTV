@@ -43,12 +43,18 @@ def get_config() -> dict:
 
     # --- YOLOv8 model ---
     cfg.setdefault("model_path", "weights/helmet_model.pt")
+    cfg.setdefault("person_model_path", "weights/person_model.pt")
     cfg.setdefault("class_file", "data/class_names.yaml")
     cfg.setdefault("confidence_threshold", 0.25)
 
     # --- Alarm cooldown ---
     # Minimum seconds between alarms per camera. 0 = no rate limiting.
     cfg.setdefault("alarm_cooldown_sec", 10)
+
+    # --- Local test sound ---
+    # If True, play a local machine sound when burglar alarm triggers.
+    # Intended for testing only.
+    cfg.setdefault("burglar_test_sound", False)
 
     # --- Alarm transport (legacy backward-compat keys) ---
     cfg.setdefault("esp_ip", "")
