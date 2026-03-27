@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="SkyCCTVAI",
+    title="Axis CCTV",
     version="3.0.0",
     description="Real-time CCTV AI platform with PostgreSQL, JWT auth, and multi-transport alarms",
     lifespan=lifespan,

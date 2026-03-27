@@ -83,7 +83,7 @@ export default function ReportsPanel() {
     try {
       const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== ''))
       const res = await api.exportAlertsCsv(params)
-      const blob = await res.blob()
+      const blob = res.data
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

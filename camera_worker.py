@@ -686,10 +686,28 @@ def camera_loop(
             else:
                 label = f"{display_name.upper()} {det['conf']:.2f}"
             color = (0, 255, 0) if class_name in _safe_set else (0, 0, 255)
-            cv2.rectangle(resized, (x1, y1), (x2, y2), color, 2)
+
+            # Draw NH slightly smaller to reduce visual dominance on the stream.
+            if label == "NH":
+                shrink_x = max(1, int((x2 - x1) * 0.08))
+                shrink_y = max(1, int((y2 - y1) * 0.08))
+                x1_draw = min(x2 - 1, x1 + shrink_x)
+                y1_draw = min(y2 - 1, y1 + shrink_y)
+                x2_draw = max(x1_draw + 1, x2 - shrink_x)
+                y2_draw = max(y1_draw + 1, y2 - shrink_y)
+                box_thickness = 1
+                label_scale = 0.45
+                label_thickness = 1
+            else:
+                x1_draw, y1_draw, x2_draw, y2_draw = x1, y1, x2, y2
+                box_thickness = 2
+                label_scale = 0.6
+                label_thickness = 2
+
+            cv2.rectangle(resized, (x1_draw, y1_draw), (x2_draw, y2_draw), color, box_thickness)
             if label:
-                cv2.putText(resized, label, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                cv2.putText(resized, label, (x1_draw, y1_draw - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, label_scale, color, label_thickness)
 
         # ── hand bounding boxes via MediaPipe + gloves classification ────────
         if _run_gloves and _mp_hands is not None:

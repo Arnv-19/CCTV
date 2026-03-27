@@ -133,7 +133,7 @@ export default function App() {
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
             <Camera size={18} />
           </div>
-          <span className="text-base sm:text-lg font-bold tracking-wide">SkyCCTVAI</span>
+          <span className="text-base sm:text-lg font-bold tracking-wide">Axis CCTV</span>
         </div>
 
         {/* Desktop stats — hidden on mobile */}

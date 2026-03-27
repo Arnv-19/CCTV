@@ -1,4 +1,4 @@
-# SkyCCTVAI — Class Diagram & ERD
+# Axis CCTV — Class Diagram & ERD
 
 > Diagrams use [Mermaid](https://mermaid.js.org/) syntax — rendered natively in GitHub, GitLab, and most modern IDEs.
 

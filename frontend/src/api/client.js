@@ -1,14 +1,40 @@
-/**
- * api/client.js
- * -------------
- * Typed fetch wrappers for every backend endpoint.
- *
- * - All authenticated requests attach the JWT from localStorage.
- * - On 401 the token is cleared so the auth guard can redirect to /login.
- * - CSV export returns a raw Response (caller triggers the download).
- */
+import axios from 'axios'
 
-const API_BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '')
+const API_BASE = '/api'
+
+const TOKEN_KEY = 'access_token'
+
+export const http = axios.create({
+  baseURL: API_BASE,
+  headers: {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  },
+})
+
+http.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+http.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem(TOKEN_KEY)
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.assign('/login')
+      }
+    }
+
+    const detail = error?.response?.data?.detail
+    const message = typeof detail === 'string' ? detail : error?.message || 'Request failed'
+    return Promise.reject(new Error(message))
+  },
+)
 
 function getDevStreamCandidates() {
   const portsStr = (import.meta.env.VITE_STREAM_PORTS || '8000,8010').trim()
@@ -33,42 +59,28 @@ function getStreamBase(attempt = 0) {
   return candidates[idx]
 }
 
-function getToken() {
-  return localStorage.getItem('skycctvai_token')
-}
-
-async function req(method, path, body, { raw = false } = {}) {
-  const headers = {}
-  const token = getToken()
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  if (body) headers['Content-Type'] = 'application/json'
-
-  const opts = { method, headers, cache: 'no-store' }
-  if (body) opts.body = JSON.stringify(body)
-
-  const res = await fetch(`${API_BASE}${path}`, opts)
-
-  // Auto-clear invalid token so auth guard redirects to /login
-  if (res.status === 401) {
-    localStorage.removeItem('skycctvai_token')
-    window.dispatchEvent(new Event('skycctvai:unauthorized'))
-    throw new Error('Session expired. Please log in again.')
-  }
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || res.statusText)
-  }
-
-  if (raw) return res
-  return res.json()
+async function req(method, path, body, { raw = false, responseType } = {}) {
+  const response = await http.request({
+    method,
+    url: path,
+    data: body,
+    responseType,
+  })
+  if (raw) return response
+  return response.data
 }
 
 export const api = {
-  // ── Auth ──────────────────────────────────────────────────────────────
-  login: (username, password) =>
-    req('POST', '/auth/login', { username, password }),
-  me: () => req('GET', '/auth/me'),
+  // ── Auth flow (/users/*) ─────────────────────────────────────────────
+  register: ({ email, password, phone_number = '' }) =>
+    req('POST', '/users/register', { email, password, phone_number }),
+  login: ({ email, password }) =>
+    req('POST', '/users/login', { email, password }),
+  forgotPassword: (email) =>
+    req('POST', '/users/forgot-password', { email }),
+  resetPasswordWithToken: ({ token, new_password }) =>
+    req('POST', '/users/reset-password', { token, new_password }),
+  me: () => req('GET', '/users/me'),
 
   // ── Users (admin) ─────────────────────────────────────────────────────
   getUsers: () => req('GET', '/users/'),
@@ -128,7 +140,7 @@ export const api = {
     const qs = new URLSearchParams(
       Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
     ).toString()
-    return req('GET', `/alerts/export${qs ? '?' + qs : ''}`, null, { raw: true })
+    return req('GET', `/alerts/export${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
   },
 
   // ── ROI Zones ─────────────────────────────────────────────────────────

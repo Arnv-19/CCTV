@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run the SkyCCTVAI FastAPI server from the project root
+# Run the Axis CCTV FastAPI server from the project root
 cd "$(dirname "$0")"
 
 # Load environment variables

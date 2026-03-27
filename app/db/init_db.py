@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+from sqlalchemy import text
+
 from app.db.database import engine, Base, SessionLocal
 from app.db.models import User
 from app.services.auth_service import hash_password
@@ -38,6 +40,9 @@ def create_tables():
         return
     print("[init_db] Creating tables...")
     Base.metadata.create_all(bind=engine)
+    # Lightweight migration for existing deployments.
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(32)"))
     print("[init_db] Tables created.")
 
 
