@@ -15,6 +15,7 @@
 import { createContext, useContext, useState, useCallback, useMemo } from 'react'
 
 const AuthContext = createContext(null)
+const TOKEN_KEY = 'access_token'
 
 function decodeJwtPayload(token) {
   try {
@@ -26,20 +27,20 @@ function decodeJwtPayload(token) {
 }
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem('skycctvai_token'))
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
   const [user, setUser]   = useState(() => {
-    const t = localStorage.getItem('skycctvai_token')
+    const t = localStorage.getItem(TOKEN_KEY)
     return t ? decodeJwtPayload(t) : null
   })
 
   const login = useCallback((newToken) => {
-    localStorage.setItem('skycctvai_token', newToken)
+    localStorage.setItem(TOKEN_KEY, newToken)
     setToken(newToken)
     setUser(decodeJwtPayload(newToken))
   }, [])
 
   const logout = useCallback(() => {
-    localStorage.removeItem('skycctvai_token')
+    localStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setUser(null)
   }, [])

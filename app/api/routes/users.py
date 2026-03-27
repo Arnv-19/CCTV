@@ -1,26 +1,46 @@
-"""
-app/api/routes/users.py
-------------------------
-Admin-only user management endpoints.
+"""User routes: public auth flow + admin user management."""
 
-GET    /api/users/          List all users
-POST   /api/users/          Create a new user
-PATCH  /api/users/{id}      Update username, email, role, or active status
-DELETE /api/users/{id}      Deactivate (soft-delete) a user
-POST   /api/users/{id}/reset-password  Set a new password for a user
-"""
+import hashlib
+import re
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import User
-from app.services.auth_service import hash_password
-from app.dependencies import require_admin
+from app.db.models import PasswordResetToken, User
+from app.dependencies import get_current_user, require_admin
+from app.services.auth_service import create_access_token, hash_password, verify_password
 
 router = APIRouter()
+
+_PHONE_ALLOWED = re.compile(r"^[0-9+()\-\s]+$")
+_GENERIC_FORGOT_MSG = "If an account exists for this email, password reset instructions have been sent."
+
+
+def _norm_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _norm_phone(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _derive_username(email: str, db: Session) -> str:
+    base = email.split("@", 1)[0][:40] or "user"
+    candidate = base
+    suffix = 1
+    while db.query(User).filter(User.username == candidate).first() is not None:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
 
 
 class UserCreate(BaseModel):
@@ -40,16 +60,161 @@ class PasswordReset(BaseModel):
     new_password: str
 
 
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    phone_number: Optional[str] = None
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        phone = _norm_phone(value)
+        if phone is None:
+            return None
+        if not _PHONE_ALLOWED.match(phone):
+            raise ValueError("Phone number contains invalid characters")
+        digits = re.sub(r"\D", "", phone)
+        if len(digits) < 7:
+            raise ValueError("Phone number must include at least 7 digits")
+        return phone
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    refresh_token: Optional[str] = None
+    role: str
+    email: EmailStr
+    username: str
+
+
+class GenericMessage(BaseModel):
+    message: str
+
+
 def _user_dict(u: User) -> dict:
     return {
         "id":         u.id,
         "username":   u.username,
         "email":      u.email,
+        "phone_number": u.phone_number,
         "role":       u.role,
         "is_active":  u.is_active,
         "created_at": u.created_at,
         "last_login": u.last_login,
     }
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=GenericMessage)
+def register_user(body: RegisterRequest, db: Session = Depends(get_db)):
+    email = _norm_email(body.email)
+    existing = db.query(User).filter(func.lower(User.email) == email).first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+
+    user = User(
+        username=_derive_username(email, db),
+        email=email,
+        phone_number=_norm_phone(body.phone_number),
+        password_hash=hash_password(body.password),
+        role="operator",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    return {"message": "Registration successful. Please sign in."}
+
+
+@router.post("/login", response_model=AuthTokenResponse)
+def login_user(body: LoginRequest, db: Session = Depends(get_db)):
+    email = _norm_email(body.email)
+    user = db.query(User).filter(func.lower(User.email) == email).first()
+    if user is None or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Your account is currently inactive")
+
+    user.last_login = datetime.now(timezone.utc)
+    db.commit()
+
+    token = create_access_token({"sub": user.username, "role": user.role, "id": user.id, "email": user.email})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "refresh_token": None,
+        "role": user.role,
+        "email": user.email,
+        "username": user.username,
+    }
+
+
+@router.post("/forgot-password", response_model=GenericMessage)
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    email = _norm_email(body.email)
+    user = db.query(User).filter(func.lower(User.email) == email).first()
+    if user is not None and user.is_active:
+        raw_token = secrets.token_urlsafe(48)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+
+        db.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+            )
+        )
+        db.commit()
+        # In production this token should be sent via email/SMS provider.
+        print(f"[auth] Password reset token for {email}: {raw_token}")
+
+    return {"message": _GENERIC_FORGOT_MSG}
+
+
+@router.post("/reset-password", response_model=GenericMessage)
+def reset_password_with_token(body: ResetPasswordRequest, db: Session = Depends(get_db)):
+    token_hash = hashlib.sha256(body.token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+
+    reset_row = (
+        db.query(PasswordResetToken)
+        .filter(
+            PasswordResetToken.token_hash == token_hash,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        )
+        .first()
+    )
+    if reset_row is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    user = db.get(User, reset_row.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    user.password_hash = hash_password(body.new_password)
+    reset_row.used_at = now
+    db.commit()
+    return {"message": "Password reset successful. Please sign in."}
+
+
+@router.get("/me")
+def me(current_user: User = Depends(get_current_user)):
+    return _user_dict(current_user)
 
 
 @router.get("/")

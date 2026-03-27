@@ -1,4 +1,4 @@
-# SkyCCTVAI
+# Axis CCTV
 
 A real-time CCTV AI automation platform. Ingests multiple RTSP camera streams, runs YOLOv8 detection models on each stream, logs violations to PostgreSQL, and triggers configurable alarms (USB serial, HTTP/ESP32, GPIO, or MQTT) when violations are detected.
 
@@ -61,7 +61,7 @@ PostgreSQL  (app/db/)
 ## Project Structure
 
 ```
-SkyCCTVAI/
+AxisCCTV/
 ├── app/                              # FastAPI application package
 │   ├── main.py                       # App factory, CORS, lifespan, route mounts
 │   ├── config.py                     # config.yaml load/save helpers + defaults

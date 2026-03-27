@@ -59,6 +59,7 @@ class User(Base):
     id            = Column(Integer, primary_key=True, index=True)
     username      = Column(String(64), unique=True, nullable=False, index=True)
     email         = Column(String(255), unique=True, nullable=False)
+    phone_number  = Column(String(32), nullable=True)
     password_hash = Column(String(255), nullable=False)
     role          = Column(String(16), nullable=False, default="operator")
     # role values: "admin" | "operator"
@@ -70,6 +71,23 @@ class User(Base):
     acknowledged_alerts = relationship(
         "Alert", back_populates="acknowledger", foreign_keys="Alert.acknowledged_by"
     )
+    password_reset_tokens = relationship(
+        "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class PasswordResetToken(Base):
+    """One-time password reset token (stored as hash + expiry)."""
+    __tablename__ = "password_reset_tokens"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(128), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at    = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="password_reset_tokens")
 
 
 class Buzzer(Base):
