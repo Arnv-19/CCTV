@@ -1,0 +1,67 @@
+# ============================================================
+#  skyai-cctv.service  —  systemd unit for the Axis CCTV API
+#
+#  Install on the server:
+#    sudo cp scripts/deploy/skyai-cctv.service /etc/systemd/system/
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable --now skyai-cctv
+#
+#  Edit the placeholders below before copying:
+#    <APP_DIR>   → absolute path to the repo, e.g. /opt/skyai_cctv
+#    <APP_USER>  → system user that owns the app files
+#    <APP_GROUP> → (usually same as user, e.g. www-data or the user itself)
+# ============================================================
+
+[Unit]
+Description=Axis CCTV FastAPI Service
+Documentation=file://<APP_DIR>/README.md
+After=network.target postgresql.service
+Wants=network.target
+
+[Service]
+# ── Identity ────────────────────────────────────────────────
+Type=simple
+User=<APP_USER>
+Group=<APP_GROUP>
+WorkingDirectory=<APP_DIR>
+
+# ── Environment ─────────────────────────────────────────────
+EnvironmentFile=-<APP_DIR>/.env
+Environment=APP_ENV=production
+Environment=PORT=8000
+Environment=WORKERS=2
+
+# ── Process ─────────────────────────────────────────────────
+ExecStart=<APP_DIR>/.venv/bin/python -m uvicorn app.main:app \
+            --host 0.0.0.0 \
+            --port ${PORT} \
+            --workers ${WORKERS} \
+            --access-log \
+            --log-level info
+
+# ── Graceful shutdown ────────────────────────────────────────
+# SIGTERM causes uvicorn to stop accepting new connections and
+# drain in-flight requests before exiting.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# ── Restart policy ───────────────────────────────────────────
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# ── Hardening (optional but recommended) ────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=<APP_DIR>/logs <APP_DIR>/snapshots <APP_DIR>/data
+
+# ── Logging ─────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=skyai-cctv
+
+[Install]
+WantedBy=multi-user.target

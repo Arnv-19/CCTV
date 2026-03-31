@@ -389,3 +389,8 @@ Update WiFi credentials in the firmware before flashing via Arduino IDE.
 ## GPU Acceleration
 
 `detector.py` uses `device='cuda'` by default. Change to `device='cpu'` in `detector.py` if no CUDA GPU is available.
+
+
+
+##start the fronend server
+npm run dev -- --host 192.168.20.191 --port 5173 --strictPort
