@@ -17,6 +17,7 @@ POST   /api/burglar-alarm/events/{event_id}/ack   Acknowledge an event
 
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
@@ -28,6 +29,12 @@ from app.dependencies import get_current_user, require_admin
 from app.services.burglar_alarm_service import is_in_alarm_window
 
 router = APIRouter()
+_IST_TZ = ZoneInfo("Asia/Kolkata")
+
+
+def _now_ist_naive() -> datetime:
+    """Return current IST time as a naive datetime for DB DateTime columns."""
+    return datetime.now(_IST_TZ).replace(tzinfo=None)
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +284,7 @@ def acknowledge_event(
         return _event_dict(event)   # idempotent — already acked
     event.acknowledged    = True
     event.acknowledged_by = current_user.id
-    event.acknowledged_at = datetime.utcnow()
+    event.acknowledged_at = _now_ist_naive()
     db.commit()
     db.refresh(event)
     return _event_dict(event)

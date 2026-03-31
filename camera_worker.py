@@ -689,14 +689,14 @@ def camera_loop(
 
             # Draw NH slightly smaller to reduce visual dominance on the stream.
             if label == "NH":
-                shrink_x = max(1, int((x2 - x1) * 0.08))
-                shrink_y = max(1, int((y2 - y1) * 0.08))
+                shrink_x = max(1, int((x2 - x1) * 0.12))
+                shrink_y = max(1, int((y2 - y1) * 0.12))
                 x1_draw = min(x2 - 1, x1 + shrink_x)
                 y1_draw = min(y2 - 1, y1 + shrink_y)
                 x2_draw = max(x1_draw + 1, x2 - shrink_x)
                 y2_draw = max(y1_draw + 1, y2 - shrink_y)
                 box_thickness = 1
-                label_scale = 0.45
+                label_scale = 0.35
                 label_thickness = 1
             else:
                 x1_draw, y1_draw, x2_draw, y2_draw = x1, y1, x2, y2

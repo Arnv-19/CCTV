@@ -9,9 +9,11 @@ Shutdown: stops camera threads, closes serial.
 """
 
 import os
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -87,6 +89,17 @@ app.include_router(rois.router,            prefix="/api/rois",            tags=[
 # app.include_router(alerts_router.router,        prefix="/api/alerts",          tags=["alerts"])
 # app.include_router(rois.router,                 prefix="/api/rois",            tags=["rois"])
 app.include_router(burglar_alarm_router.router, prefix="/api/burglar-alarm",   tags=["burglar-alarm"])
+
+
+# ── Health check (used by CI/CD deploy pipeline) ──────────────────────────
+_START_TIME = time.time()
+
+@app.get("/health", tags=["health"], include_in_schema=False)
+def health():
+    return JSONResponse({
+        "status": "ok",
+        "uptime_seconds": round(time.time() - _START_TIME, 1),
+    })
 
 
 # ── Serve React production build ──────────────────────────────────────────

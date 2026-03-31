@@ -30,6 +30,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
+from zoneinfo import ZoneInfo
 
 # Make project root importable from this sub-package
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -43,6 +44,12 @@ from app.services.burglar_alarm_service import fetch_burglar_config
 # Sentinel value pushed to alert_queue to signal AlertWriter to stop
 _STOP_SENTINEL = None
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_IST_TZ = ZoneInfo("Asia/Kolkata")
+
+
+def _now_ist_naive() -> datetime:
+    """Return current IST time as a naive datetime for DB DateTime columns."""
+    return datetime.now(_IST_TZ).replace(tzinfo=None)
 
 
 def _resolve_local_path(path_like: str) -> Path:
@@ -198,7 +205,7 @@ def _alert_writer_loop(queue: Queue):
                         snapshot_path       = item.get("snapshot_path"),
                         buzzer_activated    = item.get("buzzer_activated", False),
                         tracker_initialized = item.get("tracker_initialized", False),
-                        triggered_at        = datetime.utcnow(),
+                        triggered_at        = _now_ist_naive(),
                         # Person bounding box
                         bbox_x1      = item.get("bbox_x1"),
                         bbox_y1      = item.get("bbox_y1"),

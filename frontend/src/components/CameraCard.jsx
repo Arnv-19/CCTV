@@ -4,6 +4,7 @@ import { api } from '../api/client'
 
 export default function CameraCard({ camera, running, streamEpoch, onEditROI }) {
   const [imgError, setImgError] = useState(false)
+  const [imgLoaded, setImgLoaded] = useState(false)
   const [streamAttempt, setStreamAttempt] = useState(0)
   const fallbacks = camera.runtime_fallbacks || {}
   // Key forces img reload when detection state or explicit epoch changes.
@@ -12,8 +13,9 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
   useEffect(() => {
     // Clear stale error when stream lifecycle changes.
     setImgError(false)
+    setImgLoaded(false)
     setStreamAttempt(0)
-  }, [streamEpoch, running, camera.id])
+  }, [streamEpoch, running, camera.id, camera.status])
 
   useEffect(() => {
     if (!running || !imgError) return
@@ -26,27 +28,42 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
     camera.status === 'error'   ? 'bg-red-500' :
     'bg-slate-500'
 
+  const cameraReady = camera.status === 'running'
+  const shouldMountStream = running && cameraReady && !imgError
+
   return (
     <div className="relative bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col">
       {/* Stream */}
-      <div className="relative flex-1 bg-black min-h-0">
-        {running && !imgError ? (
-          <img
-            key={streamKey}
+      <div className="relative bg-black aspect-video overflow-hidden">
+        {shouldMountStream ? (
+          <>
+            <img
+              key={streamKey}
               src={api.streamUrl(camera.id, streamEpoch, streamAttempt)}
-            alt={camera.title}
-            className="camera-stream"
+              alt={camera.title}
+              className="camera-stream absolute inset-0"
+              onLoad={() => setImgLoaded(true)}
               onError={() => {
+                setImgLoaded(false)
                 setImgError(true)
                 setStreamAttempt((n) => n + 1)
               }}
-          />
+            />
+            {!imgLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center text-slate-500">
+                <div className="text-center">
+                  <Tv size={36} className="mx-auto mb-2 opacity-30" />
+                  <p className="text-xs">Connecting stream...</p>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
-          <div className="flex items-center justify-center h-full min-h-[180px] text-slate-600">
+          <div className="absolute inset-0 flex items-center justify-center text-slate-600">
             <div className="text-center">
               <Tv size={36} className="mx-auto mb-2 opacity-30" />
               <p className="text-xs">
-                {imgError ? 'Stream unavailable' : 'Not running'}
+                {imgError ? 'Stream unavailable' : (running ? 'Starting camera...' : 'Not running')}
               </p>
             </div>
           </div>
