@@ -44,6 +44,8 @@ def get_config() -> dict:
     # --- YOLOv8 model ---
     cfg.setdefault("model_path", "weights/helmet_model.pt")
     cfg.setdefault("person_model_path", "weights/person_model.pt")
+    cfg.setdefault("gloves_model_path", "weights/best 1.pt")
+    cfg.setdefault("ppe_model_path", "weights/ppe_model.pt")
     cfg.setdefault("class_file", "data/class_names.yaml")
     cfg.setdefault("confidence_threshold", 0.25)
 

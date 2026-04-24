@@ -7,6 +7,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
   const [imgLoaded, setImgLoaded] = useState(false)
   const [streamAttempt, setStreamAttempt] = useState(0)
   const fallbacks = camera.runtime_fallbacks || {}
+  const resources = camera.resources || null
   // Key forces img reload when detection state or explicit epoch changes.
   const streamKey = `cam-${camera.id}-${running ? 'on' : 'off'}-${streamEpoch}`
 
@@ -79,37 +80,46 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 bg-slate-800 border-t border-slate-700 flex items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
-          <span className="font-semibold text-slate-200 truncate">{camera.title}</span>
+      <div className="px-3 py-2 bg-slate-800 border-t border-slate-700 text-xs">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
+            <span className="font-semibold text-slate-200 truncate">{camera.title}</span>
+          </div>
+          <div className="flex items-center gap-3 text-slate-400 shrink-0">
+            {fallbacks.model_fallback && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 text-[10px] font-semibold">
+                model fallback
+              </span>
+            )}
+            {fallbacks.source_fallback && (
+              <span className="px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-300 text-[10px] font-semibold">
+                webcam fallback
+              </span>
+            )}
+            {camera.fps > 0 && (
+              <span className="flex items-center gap-1">
+                <Activity size={11} />
+                {camera.fps} fps
+              </span>
+            )}
+            <span>Cam {camera.id}</span>
+            <button
+              onClick={() => onEditROI?.(camera.id)}
+              title="Edit ROI zones"
+              className="p-1 text-slate-500 hover:text-blue-400 hover:bg-slate-700 rounded transition-colors"
+            >
+              <Crop size={13} />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3 text-slate-400 shrink-0">
-          {fallbacks.model_fallback && (
-            <span className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 text-[10px] font-semibold">
-              model fallback
-            </span>
-          )}
-          {fallbacks.source_fallback && (
-            <span className="px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-300 text-[10px] font-semibold">
-              webcam fallback
-            </span>
-          )}
-          {camera.fps > 0 && (
-            <span className="flex items-center gap-1">
-              <Activity size={11} />
-              {camera.fps} fps
-            </span>
-          )}
-          <span>Cam {camera.id}</span>
-          <button
-            onClick={() => onEditROI?.(camera.id)}
-            title="Edit ROI zones"
-            className="p-1 text-slate-500 hover:text-blue-400 hover:bg-slate-700 rounded transition-colors"
-          >
-            <Crop size={13} />
-          </button>
-        </div>
+
+        {resources && (
+          <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-400">
+            <span>CPU {resources.thread_cpu_percent_single_core}% of one core</span>
+            <span>Buffer {resources.frame_buffer_mb} MB</span>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -38,6 +38,12 @@ def list_cameras():
     return camera_manager.get_camera_statuses()
 
 
+@router.get("/metrics")
+def camera_metrics():
+    """Return server totals plus per-camera runtime resource metrics."""
+    return camera_manager.get_resource_metrics()
+
+
 @router.post("/")
 def add_camera(body: CameraUpdate):
     """Append a new camera to config.yaml. Does not start it automatically."""

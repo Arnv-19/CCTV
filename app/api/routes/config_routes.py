@@ -35,6 +35,8 @@ class ConfigUpdate(BaseModel):
     # YOLOv8 model
     model_path: Optional[str] = None
     person_model_path: Optional[str] = None
+    gloves_model_path: Optional[str] = None
+    ppe_model_path: Optional[str] = None
     confidence_threshold: Optional[float] = None
 
     # Alarm rate limiting

@@ -27,10 +27,12 @@ The singleton instance `camera_manager` is imported directly by route modules.
 import threading
 import sys
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
 from zoneinfo import ZoneInfo
+import psutil
 
 # Make project root importable from this sub-package
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -270,6 +272,13 @@ class CameraManager:
         self.alert_queue: Queue = Queue()
         # AlertWriter background thread
         self._alert_writer_thread: threading.Thread | None = None
+        self._process = psutil.Process(os.getpid())
+        self._process_cpu_sample = {
+            "cpu_time": sum(self._process.cpu_times()[:2]),
+            "sample_at": time.time(),
+        }
+        self._thread_cpu_samples: dict[int, dict] = {}
+        self._cpu_percent_primed = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -486,6 +495,7 @@ class CameraManager:
         with self.lock:
             self.frame_dict.clear()
             self.stats_dict.clear()
+        self._thread_cpu_samples.clear()
         self._running = False
         self._stop_alert_writer()
 
@@ -535,6 +545,7 @@ class CameraManager:
             self.threads[cam_id].join(timeout=2)
             del self.stop_events[cam_id]
             del self.threads[cam_id]
+        self._thread_cpu_samples.pop(cam_id, None)
 
     def _start_alert_writer(self):
         """Start the AlertWriter background thread if it is not already running."""
@@ -652,6 +663,126 @@ class CameraManager:
         """Return a copy of the stats dict (safe to serialize as JSON)."""
         with self.lock:
             return dict(self.stats_dict)
+
+    def get_resource_metrics(self) -> dict:
+        """
+        Return current server, process, and per-camera resource usage.
+
+        Per-camera CPU comes from the worker thread's CPU time delta between polls.
+        Per-camera memory cannot be isolated accurately for Python threads, so the
+        response exposes the live JPEG frame-buffer size per camera instead.
+        """
+        now = time.time()
+        logical_cores = psutil.cpu_count(logical=True) or 1
+        physical_cores = psutil.cpu_count(logical=False) or logical_cores
+        system_memory = psutil.virtual_memory()
+
+        if not self._cpu_percent_primed:
+            psutil.cpu_percent(interval=None)
+            self._cpu_percent_primed = True
+        system_cpu_percent = round(psutil.cpu_percent(interval=None), 1)
+
+        process_cpu_times = self._process.cpu_times()
+        process_cpu_time = process_cpu_times.user + process_cpu_times.system
+        prev_process_sample = self._process_cpu_sample
+        elapsed = max(now - prev_process_sample["sample_at"], 1e-6)
+        process_cpu_percent_single_core = max(
+            0.0,
+            (process_cpu_time - prev_process_sample["cpu_time"]) / elapsed * 100.0,
+        )
+        self._process_cpu_sample = {"cpu_time": process_cpu_time, "sample_at": now}
+        process_cpu_percent_single_core = round(process_cpu_percent_single_core, 1)
+        process_cpu_percent_total = round(
+            min(100.0, process_cpu_percent_single_core / logical_cores),
+            1,
+        )
+
+        process_memory = self._process.memory_info()
+        thread_cpu_times = {
+            thread.id: thread.user_time + thread.system_time
+            for thread in self._process.threads()
+        }
+
+        cfg = get_config()
+        feeds = cfg.get("camera_feeds", [])
+        titles = cfg.get("camera_titles", [])
+
+        with self.lock:
+            stats_snapshot = {cam_id: dict(stats) for cam_id, stats in self.stats_dict.items()}
+            frame_sizes = {cam_id: len(frame) for cam_id, frame in self.frame_dict.items()}
+
+        cameras = []
+        for cam_id, url in enumerate(feeds):
+            title = titles[cam_id] if cam_id < len(titles) else f"Camera {cam_id}"
+            stats = stats_snapshot.get(cam_id, {})
+            thread_native_id = stats.get("thread_native_id")
+            thread_cpu_time = thread_cpu_times.get(thread_native_id) if thread_native_id is not None else None
+
+            cpu_percent_single_core = 0.0
+            if thread_native_id is not None and thread_cpu_time is not None:
+                previous = self._thread_cpu_samples.get(cam_id)
+                if previous and previous.get("thread_native_id") == thread_native_id:
+                    thread_elapsed = max(now - previous["sample_at"], 1e-6)
+                    cpu_percent_single_core = max(
+                        0.0,
+                        (thread_cpu_time - previous["cpu_time"]) / thread_elapsed * 100.0,
+                    )
+                self._thread_cpu_samples[cam_id] = {
+                    "thread_native_id": thread_native_id,
+                    "cpu_time": thread_cpu_time,
+                    "sample_at": now,
+                }
+            else:
+                self._thread_cpu_samples.pop(cam_id, None)
+
+            frame_buffer_bytes = int(stats.get("frame_buffer_bytes", frame_sizes.get(cam_id, 0)) or 0)
+            cpu_percent_single_core = round(min(cpu_percent_single_core, 100.0), 1)
+            cpu_percent_total = round(min(100.0, cpu_percent_single_core / logical_cores), 2)
+
+            cameras.append({
+                "id": cam_id,
+                "title": title,
+                "url": url,
+                "status": stats.get("status", "stopped"),
+                "active": cam_id in self.threads and self.threads[cam_id].is_alive(),
+                "fps": stats.get("fps", 0),
+                "thread_native_id": thread_native_id,
+                "thread_cpu_percent_single_core": cpu_percent_single_core,
+                "thread_cpu_percent_total_machine": cpu_percent_total,
+                "frame_buffer_bytes": frame_buffer_bytes,
+                "frame_buffer_mb": round(frame_buffer_bytes / (1024 * 1024), 3),
+            })
+
+        return {
+            "measured_at": round(now, 3),
+            "system": {
+                "cpu_logical_cores": logical_cores,
+                "cpu_physical_cores": physical_cores,
+                "cpu_percent": system_cpu_percent,
+                "total_memory_bytes": system_memory.total,
+                "available_memory_bytes": system_memory.available,
+                "used_memory_bytes": system_memory.used,
+                "memory_percent": round(system_memory.percent, 1),
+                "total_memory_gb": round(system_memory.total / (1024 ** 3), 2),
+                "used_memory_gb": round(system_memory.used / (1024 ** 3), 2),
+                "available_memory_gb": round(system_memory.available / (1024 ** 3), 2),
+            },
+            "process": {
+                "pid": self._process.pid,
+                "thread_count": self._process.num_threads(),
+                "cpu_percent_single_core": process_cpu_percent_single_core,
+                "cpu_percent_total_machine": process_cpu_percent_total,
+                "rss_memory_bytes": process_memory.rss,
+                "rss_memory_mb": round(process_memory.rss / (1024 * 1024), 2),
+                "vms_memory_bytes": process_memory.vms,
+                "vms_memory_mb": round(process_memory.vms / (1024 * 1024), 2),
+            },
+            "cameras": cameras,
+            "notes": [
+                "Per-camera CPU is estimated from each camera worker thread between polls.",
+                "Per-camera memory is reported as live MJPEG frame-buffer size because Python thread memory cannot be isolated accurately.",
+            ],
+        }
 
     def get_camera_statuses(self) -> list:
         """
