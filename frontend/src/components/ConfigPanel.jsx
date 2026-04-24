@@ -187,7 +187,7 @@ function CameraModels({ camId, canEdit }) {
 
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function ConfigPanel({ onSaved }) {
+export default function ConfigPanel({ onSaved, systemMetrics }) {
   const { isAdmin } = useAuth()
   const [cfg,      setCfg]     = useState(null)
   const [buzzers,  setBuzzers] = useState([])
@@ -244,6 +244,8 @@ export default function ConfigPanel({ onSaved }) {
   )
 
   const cameraCount = (cfg.camera_feeds || []).length
+  const system = systemMetrics?.system
+  const process = systemMetrics?.process
 
   return (
     <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-5">
@@ -251,6 +253,33 @@ export default function ConfigPanel({ onSaved }) {
         <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
         </div>
+      )}
+
+      {system && process && (
+        <Section title="System Resource Overview">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+            <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Server CPU</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-100">{system.cpu_percent}%</p>
+              <p className="text-xs text-slate-400">{system.cpu_logical_cores} logical cores</p>
+            </div>
+            <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">App CPU</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-100">{process.cpu_percent_total_machine}%</p>
+              <p className="text-xs text-slate-400">{process.cpu_percent_single_core}% of one core</p>
+            </div>
+            <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Server Memory</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-100">{system.used_memory_gb} / {system.total_memory_gb} GB</p>
+              <p className="text-xs text-slate-400">App RSS {process.rss_memory_mb} MB</p>
+            </div>
+            <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">CPU Layout</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-100">{system.cpu_physical_cores} / {system.cpu_logical_cores}</p>
+              <p className="text-xs text-slate-400">physical / logical cores</p>
+            </div>
+          </div>
+        </Section>
       )}
 
       {/* Cameras */}
@@ -301,6 +330,27 @@ export default function ConfigPanel({ onSaved }) {
             className={inputCls}
             value={cfg.model_path || ''}
             onChange={e => setCfg({ ...cfg, model_path: e.target.value })}
+          />
+        </Field>
+        <Field label="Person model path">
+          <input
+            className={inputCls}
+            value={cfg.person_model_path || ''}
+            onChange={e => setCfg({ ...cfg, person_model_path: e.target.value })}
+          />
+        </Field>
+        <Field label="Gloves model path">
+          <input
+            className={inputCls}
+            value={cfg.gloves_model_path || ''}
+            onChange={e => setCfg({ ...cfg, gloves_model_path: e.target.value })}
+          />
+        </Field>
+        <Field label="PPE model path">
+          <input
+            className={inputCls}
+            value={cfg.ppe_model_path || ''}
+            onChange={e => setCfg({ ...cfg, ppe_model_path: e.target.value })}
           />
         </Field>
         <Field label="Confidence threshold">

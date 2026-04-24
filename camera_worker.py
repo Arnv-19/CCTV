@@ -302,13 +302,26 @@ def camera_loop(
         )
         _mp_hands = _mp_vision.HandLandmarker.create_from_options(_opts)
 
-    def set_stats(status: str, fps: float = 0, violations: int = 0, frames: int = 0):
+    thread_native_id = threading.get_native_id()
+
+    def set_stats(
+        status: str,
+        fps: float = 0,
+        violations: int = 0,
+        frames: int = 0,
+        extra: dict | None = None,
+    ):
         if stats_dict is not None:
             with lock:
-                stats_dict[cam_id] = {
+                stats = dict(stats_dict.get(cam_id, {}))
+                stats.update({
                     "status": status, "fps": fps,
                     "violations": violations, "frames": frames,
-                }
+                    "thread_native_id": thread_native_id,
+                })
+                if extra:
+                    stats.update(extra)
+                stats_dict[cam_id] = stats
 
     # Convert numeric string to int so cv2 treats it as a device index (e.g. "0" → webcam)
     source = int(stream_url) if isinstance(stream_url, str) and stream_url.isdigit() else stream_url
@@ -741,10 +754,17 @@ def camera_loop(
 
         # ── encode JPEG for MJPEG stream ───────────────────────────────────
         _, jpeg = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        jpeg_bytes = jpeg.tobytes()
         with lock:
-            frame_dict[cam_id] = jpeg.tobytes()
+            frame_dict[cam_id] = jpeg_bytes
 
-        set_stats("running", round(fps, 1), violations, frame_count)
+        set_stats(
+            "running",
+            round(fps, 1),
+            violations,
+            frame_count,
+            extra={"frame_buffer_bytes": len(jpeg_bytes)},
+        )
 
     cap.release()
     if _mp_hands is not None:
@@ -752,4 +772,4 @@ def camera_loop(
             _mp_hands.close()
         except Exception:
             pass
-    set_stats("stopped", 0, violations, frame_count)
+    set_stats("stopped", 0, violations, frame_count, extra={"frame_buffer_bytes": 0})

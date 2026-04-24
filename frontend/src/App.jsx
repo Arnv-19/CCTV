@@ -56,6 +56,7 @@ export default function App() {
   const [toast,       setToast]       = useState(null)
   const [streamEpoch, setStreamEpoch] = useState(0)
   const [roiCameraId, setRoiCameraId] = useState(null)  // null = ROI modal closed
+  const [resourceMetrics, setResourceMetrics] = useState(null)
 
   const TABS = buildTabs(isAdmin)
 
@@ -78,10 +79,26 @@ export default function App() {
 
   const fetchCameras = useCallback(async () => {
     try {
-      const data = await api.getCameras()
-      setCameras(data)
-      setRunning(data.some(c => c.active))
-    } catch {}
+      const [cameraData, metricsData] = await Promise.all([
+        api.getCameras(),
+        api.getCameraMetrics(),
+      ])
+      const resourceByCameraId = new Map((metricsData?.cameras || []).map((cam) => [cam.id, cam]))
+      const mergedCameras = cameraData.map((cam) => ({
+        ...cam,
+        resources: resourceByCameraId.get(cam.id) || null,
+      }))
+      setCameras(mergedCameras)
+      setResourceMetrics(metricsData)
+      setRunning(mergedCameras.some(c => c.active))
+    } catch {
+      try {
+        const data = await api.getCameras()
+        setCameras(data)
+        setRunning(data.some(c => c.active))
+      } catch {}
+      setResourceMetrics(null)
+    }
   }, [])
 
   useEffect(() => {
@@ -216,11 +233,15 @@ export default function App() {
             cameras={cameras}
             running={running}
             streamEpoch={streamEpoch}
+            systemMetrics={resourceMetrics}
             onEditROI={setRoiCameraId}
           />
         )}
         {tab === 'config'  && (
-          <ConfigPanel onSaved={() => { showToast('Config saved'); fetchCameras() }} />
+          <ConfigPanel
+            onSaved={() => { showToast('Config saved'); fetchCameras() }}
+            systemMetrics={resourceMetrics}
+          />
         )}
         {tab === 'reports' && <ReportsPanel />}
         {tab === 'logs'    && <LogsPanel />}

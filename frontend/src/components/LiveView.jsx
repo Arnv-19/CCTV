@@ -1,6 +1,6 @@
 import CameraCard from './CameraCard'
 
-export default function LiveView({ cameras, running, streamEpoch, onEditROI }) {
+export default function LiveView({ cameras, running, streamEpoch, systemMetrics, onEditROI }) {
   if (cameras.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-slate-500">
@@ -20,16 +20,24 @@ export default function LiveView({ cameras, running, streamEpoch, onEditROI }) {
     'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
 
   return (
-    <div className={`grid ${cols} gap-2 p-3 h-full`}>
-      {cameras.map((cam) => (
-        <CameraCard
-          key={cam.id}
-          camera={cam}
-          running={running}
-          streamEpoch={streamEpoch}
-          onEditROI={onEditROI}
-        />
-      ))}
+    <div className="h-full overflow-auto p-3 space-y-3">
+      {systemMetrics?.notes?.length > 0 && (
+        <div className="rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-2 text-xs text-slate-400">
+          {systemMetrics.notes[1]}
+        </div>
+      )}
+
+      <div className={`grid ${cols} gap-2`}>
+        {cameras.map((cam) => (
+          <CameraCard
+            key={cam.id}
+            camera={cam}
+            running={running}
+            streamEpoch={streamEpoch}
+            onEditROI={onEditROI}
+          />
+        ))}
+      </div>
     </div>
   )
 }
