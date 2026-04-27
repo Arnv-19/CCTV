@@ -20,7 +20,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
 
   useEffect(() => {
     if (!running || !imgError) return
-    const id = setTimeout(() => setImgError(false), 2500)
+    const id = setTimeout(() => setImgError(false), 800)
     return () => clearTimeout(id)
   }, [imgError, running, streamEpoch, camera.id])
 

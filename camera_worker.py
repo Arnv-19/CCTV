@@ -215,18 +215,18 @@ def camera_loop(
         "no_helmet":        "NH",
         "helmet":           "",
         # Vest
-        "NO-Safety Vest":   "No Vest",
-        "Safety Vest":      "Vest",
-        "no_vest":          "No Vest",
-        "vest":             "Vest",
+        "NO-Safety Vest":   "NV",
+        "Safety Vest":      "",
+        "no_vest":          "NV",
+        "vest":             "",
         # Goggles / glasses
-        "NO-Goggles":       "No Goggles",
-        "Goggles":          "Goggles",
+        "NO-Goggles":       "NGL",
+        "Goggles":          "",
         # Gloves
-        "Gloves":           "Gloves",
-        "NO-Gloves":        "No Gloves",
-        "bare_hand":        "Bare Hand",
-        "bare_hands":       "Bare Hands",
+        "Gloves":           "",
+        "NO-Gloves":        "NGO",
+        "bare_hand":        "NGO",
+        "bare_hands":       "NGO",
         # Mask
         "Mask":             "Mask",
         "NO-Mask":          "No Mask",
@@ -692,16 +692,37 @@ def camera_loop(
                     # Compliant helmet — skip box and label entirely
                     continue
 
+            # Vest compliance suppression
+            if any(k in cls_key for k in ("vest",)):
+                if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
+                    display_name = "NV"
+                else:
+                    continue
+
+            # Glasses / goggles compliance suppression
+            if any(k in cls_key for k in ("goggle", "glasses", "goggle")):
+                if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
+                    display_name = "NGL"
+                else:
+                    continue
+
+            # Gloves compliance suppression
+            if any(k in cls_key for k in ("glove",)):
+                if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
+                    display_name = "NGO"
+                else:
+                    continue
+
             if not display_name:
                 label = ""
-            elif display_name.upper() == "NH":
-                label = "NH"
+            elif display_name.upper() in ("NH", "NV", "NGO", "NGL"):
+                label = display_name.upper()
             else:
                 label = f"{display_name.upper()} {det['conf']:.2f}"
             color = (0, 255, 0) if class_name in _safe_set else (0, 0, 255)
 
-            # Draw NH slightly smaller to reduce visual dominance on the stream.
-            if label == "NH":
+            # Draw NH/NV/NGO/NGL slightly smaller to reduce visual dominance on the stream.
+            if label in ("NH", "NV", "NGO", "NGL"):
                 shrink_x = max(1, int((x2 - x1) * 0.12))
                 shrink_y = max(1, int((y2 - y1) * 0.12))
                 x1_draw = min(x2 - 1, x1 + shrink_x)
@@ -734,18 +755,25 @@ def camera_loop(
                 if gloves_detections:
                     top = max(gloves_detections, key=lambda d: d["conf"])
                     gloves_status = top["class"]
-                g_color = (0, 255, 0) if gloves_status in _safe_set else (0, 0, 255)
-                g_label = gloves_status.upper()
-                for hand_lm in hand_results.hand_landmarks:
-                    xs = [lm.x for lm in hand_lm]
-                    ys = [lm.y for lm in hand_lm]
-                    x1 = max(0, int(min(xs) * w) - 20)
-                    y1 = max(0, int(min(ys) * h) - 20)
-                    x2 = min(w, int(max(xs) * w) + 20)
-                    y2 = min(h, int(max(ys) * h) + 20)
-                    cv2.rectangle(resized, (x1, y1), (x2, y2), g_color, 2)
-                    cv2.putText(resized, g_label, (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, g_color, 2)
+                gloves_worn = gloves_status in _safe_set
+                if not gloves_worn:
+                    g_color = (0, 0, 255)
+                    for hand_lm in hand_results.hand_landmarks:
+                        xs = [lm.x for lm in hand_lm]
+                        ys = [lm.y for lm in hand_lm]
+                        x1 = max(0, int(min(xs) * w) - 20)
+                        y1 = max(0, int(min(ys) * h) - 20)
+                        x2 = min(w, int(max(xs) * w) + 20)
+                        y2 = min(h, int(max(ys) * h) + 20)
+                        shrink_x = max(1, int((x2 - x1) * 0.12))
+                        shrink_y = max(1, int((y2 - y1) * 0.12))
+                        x1d = min(x2 - 1, x1 + shrink_x)
+                        y1d = min(y2 - 1, y1 + shrink_y)
+                        x2d = max(x1d + 1, x2 - shrink_x)
+                        y2d = max(y1d + 1, y2 - shrink_y)
+                        cv2.rectangle(resized, (x1d, y1d), (x2d, y2d), g_color, 1)
+                        cv2.putText(resized, "NGO", (x1d, y1d - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, g_color, 1)
 
         fps = 1 / (time.time() - start + 1e-5)
         stat_text = f"Cam {cam_id} | FPS: {fps:.1f} | Violations: {violations}"
