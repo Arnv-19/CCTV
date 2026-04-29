@@ -48,6 +48,10 @@ def get_config() -> dict:
     cfg.setdefault("ppe_model_path", "weights/ppe_model.pt")
     cfg.setdefault("class_file", "data/class_names.yaml")
     cfg.setdefault("confidence_threshold", 0.25)
+    # Higher values preserve distant people/PPE details but cost more CPU/GPU.
+    cfg.setdefault("detection_frame_width", 960)
+    cfg.setdefault("detection_frame_height", 720)
+    cfg.setdefault("yolo_imgsz", 960)
 
     # --- Alarm cooldown ---
     # Minimum seconds between alarms per camera. 0 = no rate limiting.

@@ -53,7 +53,7 @@ def load_class_names(path: str) -> tuple[list, str, str, list, list]:
     return names, helmet_class, no_helmet_class, violation_classes, safe_classes
 
 
-def run_detection(model: YOLO, frame, confidence: float) -> list[dict]:
+def run_detection(model: YOLO, frame, confidence: float, imgsz: int | None = None) -> list[dict]:
     """
     Run YOLOv8 inference on a single BGR frame (numpy array).
 
@@ -66,9 +66,15 @@ def run_detection(model: YOLO, frame, confidence: float) -> list[dict]:
     # verbose=False: suppress per-frame console output from ultralytics
     try:
         with _PREDICT_LOCK:
-            results = model.predict(
-                source=frame, conf=confidence, stream=False, verbose=False
-            )[0]
+            kwargs = {
+                "source": frame,
+                "conf": confidence,
+                "stream": False,
+                "verbose": False,
+            }
+            if imgsz:
+                kwargs["imgsz"] = int(imgsz)
+            results = model.predict(**kwargs)[0]
     except AttributeError as e:
         # Ultralytics internals can throw AttributeError("bn") if predict is
         # called concurrently while layers are being fused/warmed.

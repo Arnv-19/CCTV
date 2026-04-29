@@ -180,6 +180,9 @@ def camera_loop(
     alert_queue: Queue = None,      # queue to AlertWriter for non-blocking DB logging
     snapshot_dir: str = "snapshots",
     snapshot_cooldown: float = 120,
+    detection_width: int = 960,
+    detection_height: int = 720,
+    yolo_imgsz: int = 960,
     enabled_models: list = None,    # list of model_name strings enabled for this camera
     violation_classes: list = None, # PPE classes that trigger an alarm
     safe_classes: list = None,      # PPE classes shown with green bounding box
@@ -397,7 +400,10 @@ def camera_loop(
     max_reconnect_attempts = 10
     last_burglar_alarm_time = 0   # separate cooldown for burglar alarm events
 
-    RESIZE_DIM = (640, 480)
+    RESIZE_DIM = (
+        max(320, int(detection_width or 960)),
+        max(240, int(detection_height or 720)),
+    )
 
      # ── KCF tracker state for burglar alarm ───────────────────────────────
     ba_tracker           = None   # cv2.TrackerKCF instance, or None when idle
@@ -488,11 +494,13 @@ def camera_loop(
             return inter_area / union_area
 
 
-        detections = run_detection(model, resized, threshold)
+        detections = run_detection(model, resized, threshold, imgsz=yolo_imgsz)
         # Gloves model — reuse main detections when both features use the same
         # YOLO instance, otherwise run the dedicated gloves model.
         if _run_gloves:
-            gloves_detections = detections if gloves_model is model else run_detection(gloves_model, resized, threshold)
+            gloves_detections = detections if gloves_model is model else run_detection(
+                gloves_model, resized, threshold, imgsz=yolo_imgsz
+            )
         else:
             gloves_detections = []
 
@@ -673,7 +681,7 @@ def camera_loop(
                         burglar_candidates = filtered_detections
                         if burglar_person_model is not None:
                             burglar_candidates = run_detection(
-                                burglar_person_model, resized, threshold
+                                burglar_person_model, resized, threshold, imgsz=yolo_imgsz
                             )
 
                         for det in burglar_candidates:

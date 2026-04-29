@@ -443,6 +443,9 @@ class CameraManager:
         cooldown          = cfg.get("alarm_cooldown_sec", 5)
         snapshot_cooldown = cfg.get("snapshot_cooldown_sec", 120)
         threshold         = cfg.get("confidence_threshold", 0.25)
+        detection_width   = cfg.get("detection_frame_width", 960)
+        detection_height  = cfg.get("detection_frame_height", 720)
+        yolo_imgsz        = cfg.get("yolo_imgsz", 960)
         burglar_test_sound = cfg.get("burglar_test_sound", False)
 
 
@@ -475,6 +478,9 @@ class CameraManager:
                 gloves_model=self.gloves_model,
                 person_model=self.person_model,
                 snapshot_cooldown=snapshot_cooldown,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                yolo_imgsz=yolo_imgsz,
                 burglar_test_sound=burglar_test_sound,
             )
             started_any = True
@@ -493,6 +499,9 @@ class CameraManager:
                 gloves_model=self.gloves_model,
                 person_model=self.person_model,
                 snapshot_cooldown=snapshot_cooldown,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                yolo_imgsz=yolo_imgsz,
                 burglar_test_sound=burglar_test_sound,
             )
         else:
@@ -551,7 +560,10 @@ class CameraManager:
             gloves_model=self.gloves_model,
             enabled_models=_fetch_enabled_models_for_camera(cam_id),
             snapshot_cooldown=cfg.get("snapshot_cooldown_sec", 120),
-            
+            detection_width=cfg.get("detection_frame_width", 960),
+            detection_height=cfg.get("detection_frame_height", 720),
+            yolo_imgsz=cfg.get("yolo_imgsz", 960),
+             
 
         )
 
@@ -599,6 +611,9 @@ class CameraManager:
         # violation_classes=None, safe_classes=None, gloves_model=None,
         violation_classes=None, safe_classes=None, gloves_model=None, person_model=None,
         snapshot_cooldown=120,
+        detection_width=960,
+        detection_height=720,
+        yolo_imgsz=960,
         burglar_test_sound=False,
     ):
         """
@@ -652,6 +667,9 @@ class CameraManager:
                 assigned_buzzers=assigned_buzzers,
                 alert_queue=self.alert_queue,
                 snapshot_cooldown=snapshot_cooldown,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                yolo_imgsz=yolo_imgsz,
                 enabled_models=enabled_models,
                 violation_classes=violation_classes or self.violation_classes,
                 safe_classes=safe_classes or self.safe_classes,
