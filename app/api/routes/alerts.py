@@ -14,6 +14,7 @@ import csv
 import io
 from datetime import date, datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -35,6 +36,11 @@ from app.services.reporting_service import (
 from app.services.whatsapp_service import WhatsAppConfigError, send_documents
 
 router = APIRouter()
+_IST_TZ = ZoneInfo("Asia/Kolkata")
+
+
+def _now_ist_naive() -> datetime:
+    return datetime.now(_IST_TZ).replace(tzinfo=None)
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +113,7 @@ def _apply_filters(query, camera_id, model_name, date_from, date_to, acknowledge
 
 
 def _resolve_report_date(report_date: Optional[date]) -> date:
-    return report_date or datetime.now().date()
+    return report_date or _now_ist_naive().date()
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +126,7 @@ def get_summary(
     _: User = Depends(get_current_user),
 ):
     """Dashboard summary cards."""
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = _now_ist_naive().replace(hour=0, minute=0, second=0, microsecond=0)
 
     total_today = db.query(func.count(Alert.id)).filter(
         Alert.triggered_at >= today_start
