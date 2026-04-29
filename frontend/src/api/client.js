@@ -143,6 +143,19 @@ export const api = {
     ).toString()
     return req('GET', `/alerts/export${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
   },
+  exportDailyReportPdf: (report_date, use_dummy_data = false) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries({ report_date, use_dummy_data }).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/alerts/daily-report.pdf${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
+  },
+  exportDailyReportExcel: (report_date, use_dummy_data = false) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries({ report_date, use_dummy_data }).filter(([, v]) => v != null && v !== ''))
+    ).toString()
+    return req('GET', `/alerts/daily-report.xlsx${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
+  },
+  sendDailyReportWhatsApp: (body = {}) => req('POST', '/alerts/daily-report/whatsapp', body),
 
   // ── ROI Zones ─────────────────────────────────────────────────────────
   getRois:         (camId, activeOnly = false) =>

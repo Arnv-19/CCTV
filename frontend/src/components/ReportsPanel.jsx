@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { Download, CheckCheck, AlertTriangle, Camera, Cpu, BellRing } from 'lucide-react'
+import { Download, CheckCheck, AlertTriangle, Camera, Cpu, BellRing, FileText, FileSpreadsheet, MessageCircle } from 'lucide-react'
 import { api } from '../api/client'
 
 const inputCls =
@@ -38,6 +38,7 @@ export default function ReportsPanel() {
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
   const PAGE_SIZE = 20
+  const reportDate = filters.date_to || filters.date_from || new Date().toISOString().slice(0, 10)
 
   const fetchAlerts = useCallback(async () => {
     setLoading(true)
@@ -45,7 +46,7 @@ export default function ReportsPanel() {
     try {
       const params = {
         ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '')),
-        skip: (page - 1) * PAGE_SIZE,
+        page,
         limit: PAGE_SIZE,
       }
       const data = await api.getAlerts(params)
@@ -91,6 +92,44 @@ export default function ReportsPanel() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) { setError(e.message) }
+  }
+
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDailyPdf = async () => {
+    try {
+      const res = await api.exportDailyReportPdf(reportDate, false)
+      downloadBlob(res.data, `daily_alert_report_${reportDate}.pdf`)
+    } catch (e) { setError(e.message) }
+  }
+
+  const handleDailyExcel = async () => {
+    try {
+      const res = await api.exportDailyReportExcel(reportDate, false)
+      downloadBlob(res.data, `daily_alert_report_${reportDate}.xlsx`)
+    } catch (e) { setError(e.message) }
+  }
+
+  const handleWhatsAppReport = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      await api.sendDailyReportWhatsApp({
+        report_date: reportDate,
+        include_pdf: true,
+        include_excel: true,
+      })
+      await fetchAlerts()
+      await fetchSummary()
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -152,6 +191,18 @@ export default function ReportsPanel() {
           <button type="submit"
             className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
             Filter
+          </button>
+          <button type="button" onClick={handleDailyPdf}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-rose-700 hover:bg-rose-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            <FileText size={14} /> Daily PDF
+          </button>
+          <button type="button" onClick={handleDailyExcel}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            <FileSpreadsheet size={14} /> Daily Excel
+          </button>
+          <button type="button" onClick={handleWhatsAppReport}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            <MessageCircle size={14} /> WhatsApp Report
           </button>
           <button type="button" onClick={handleExport}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors sm:ml-auto">
