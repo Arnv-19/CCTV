@@ -12,11 +12,10 @@ GET    /api/alerts/export     Export filtered alerts as CSV download
 
 import csv
 import io
-import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -25,6 +24,15 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import Alert, User
 from app.dependencies import get_current_user
+from app.services.reporting_service import (
+    build_daily_report_filename,
+    build_daily_report_rows,
+    get_daily_alerts_query,
+    render_daily_report_pdf,
+    render_daily_report_xlsx,
+    save_report_artifacts,
+)
+from app.services.whatsapp_service import WhatsAppConfigError, send_documents
 
 router = APIRouter()
 
@@ -60,6 +68,14 @@ class AlertOut(BaseModel):
         from_attributes = True
 
 
+class DailyReportWhatsAppRequest(BaseModel):
+    report_date: Optional[date] = None
+    to: Optional[str] = None
+    include_pdf: bool = True
+    include_excel: bool = True
+    use_dummy_data: bool = False
+
+
 def _alert_dict(a: Alert) -> dict:
     return {
         "id":               a.id,
@@ -88,6 +104,10 @@ def _apply_filters(query, camera_id, model_name, date_from, date_to, acknowledge
     if date_to     is not None: query = query.filter(Alert.triggered_at <= date_to)
     if acknowledged is not None: query = query.filter(Alert.acknowledged == acknowledged)
     return query
+
+
+def _resolve_report_date(report_date: Optional[date]) -> date:
+    return report_date or datetime.now().date()
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +149,10 @@ def get_summary(
     )
 
     return {
+        "today_count":      total_today or 0,
         "total_today":      total_today or 0,
         "unacknowledged":   unacknowledged or 0,
+        "top_camera":       top_cam.camera_id if top_cam else None,
         "top_camera_id":    top_cam.camera_id if top_cam else None,
         "top_camera_count": top_cam.cnt if top_cam else 0,
         "top_model":        top_model.model_name if top_model else None,
@@ -234,3 +256,95 @@ def export_alerts_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/daily-report.xlsx")
+def export_daily_report_xlsx(
+    report_date: Optional[date] = Query(None),
+    use_dummy_data: bool = Query(False),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    resolved_date = _resolve_report_date(report_date)
+    alerts = get_daily_alerts_query(db, resolved_date).all()
+    rows = build_daily_report_rows(
+        alerts,
+        resolved_date,
+        include_dummy_data=use_dummy_data,
+    )
+    payload = render_daily_report_xlsx(rows, resolved_date)
+    filename = build_daily_report_filename(resolved_date, "xlsx")
+    return StreamingResponse(
+        io.BytesIO(payload),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/daily-report.pdf")
+def export_daily_report_pdf(
+    report_date: Optional[date] = Query(None),
+    use_dummy_data: bool = Query(False),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    resolved_date = _resolve_report_date(report_date)
+    alerts = get_daily_alerts_query(db, resolved_date).all()
+    rows = build_daily_report_rows(
+        alerts,
+        resolved_date,
+        include_dummy_data=use_dummy_data,
+    )
+    payload = render_daily_report_pdf(rows, resolved_date)
+    filename = build_daily_report_filename(resolved_date, "pdf")
+    return StreamingResponse(
+        io.BytesIO(payload),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post("/daily-report/whatsapp")
+def send_daily_report_whatsapp(
+    body: DailyReportWhatsAppRequest = Body(default=DailyReportWhatsAppRequest()),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    resolved_date = _resolve_report_date(body.report_date)
+    alerts = get_daily_alerts_query(db, resolved_date).all()
+    if not alerts and not body.use_dummy_data:
+        raise HTTPException(400, f"No alert data found in DB for {resolved_date.isoformat()}.")
+    rows = build_daily_report_rows(
+        alerts,
+        resolved_date,
+        include_dummy_data=body.use_dummy_data,
+    )
+    if not body.include_pdf and not body.include_excel:
+        raise HTTPException(400, "Select at least one file type to send.")
+
+    artifacts = save_report_artifacts(rows, resolved_date, "violations/reports")
+    files_to_send = []
+    if body.include_pdf:
+        files_to_send.append(artifacts["pdf"])
+    if body.include_excel:
+        files_to_send.append(artifacts["xlsx"])
+
+    try:
+        responses = send_documents(
+            files_to_send,
+            recipient_number=body.to,
+            caption_text="AXIS CCTV REPORT",
+            filename_stem="AXIS CCTV REPORT",
+        )
+    except WhatsAppConfigError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    return {
+        "report_date": resolved_date.isoformat(),
+        "row_count": len(rows),
+        "files": {key: str(path) for key, path in artifacts.items()},
+        "sent": responses,
+        "used_dummy_data": body.use_dummy_data,
+    }

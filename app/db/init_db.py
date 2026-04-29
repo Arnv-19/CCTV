@@ -26,7 +26,7 @@ load_dotenv()
 from sqlalchemy import text
 
 from app.db.database import engine, Base, SessionLocal
-from app.db.models import User
+from app.db.models import Alert, User
 from app.services.auth_service import hash_password
 
 
