@@ -12,22 +12,22 @@ export default function LiveView({ cameras, running, streamEpoch, systemMetrics,
     )
   }
 
-  // Dynamic grid: 1 cam → 1 col, 2 → 1 col on mobile / 2 on sm+, 3-4 → 2×2 on sm+, 5+ → 3 cols on lg+
+  // Dynamic grid: 1 cam -> 1 col, 2 -> side by side, 3-4 -> 2x2, 5+ -> scrollable grid.
   const cols =
     cameras.length === 1 ? 'grid-cols-1' :
     cameras.length === 2 ? 'grid-cols-1 sm:grid-cols-2' :
     cameras.length <= 4 ? 'grid-cols-1 sm:grid-cols-2' :
     'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
 
-  return (
-    <div className="h-full overflow-auto p-3 space-y-3">
-      {systemMetrics?.notes?.length > 0 && (
-        <div className="rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-2 text-xs text-slate-400">
-          {systemMetrics.notes[1]}
-        </div>
-      )}
+  const fitToScreen = cameras.length <= 4
+  const rows =
+    cameras.length <= 2 ? 'sm:grid-rows-1' :
+    cameras.length <= 4 ? 'sm:grid-rows-2' :
+    ''
 
-      <div className={`grid ${cols} gap-2`}>
+  return (
+    <div className={`h-full p-2 sm:p-3 ${fitToScreen ? 'overflow-auto sm:overflow-hidden flex flex-col gap-2' : 'overflow-auto space-y-3'}`}>
+      <div className={`grid ${cols} ${rows} gap-2 ${fitToScreen ? 'sm:flex-1 sm:min-h-0' : ''}`}>
         {cameras.map((cam) => (
           <CameraCard
             key={cam.id}
@@ -35,6 +35,7 @@ export default function LiveView({ cameras, running, streamEpoch, systemMetrics,
             running={running}
             streamEpoch={streamEpoch}
             onEditROI={onEditROI}
+            fitToScreen={fitToScreen}
           />
         ))}
       </div>

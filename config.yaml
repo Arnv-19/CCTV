@@ -2,6 +2,7 @@
 # alarm_http_token: ''
 # alarm_transport: usb
 # burglar_test_sound: false
+# snapshot_cooldown_sec: 120
 # camera_feeds:
 # - 0
 # camera_titles:
@@ -25,6 +26,7 @@
 
 
 alarm_cooldown_sec: 30
+snapshot_cooldown_sec: 120
 alarm_http_token: ''
 alarm_transport: usb
 burglar_test_sound: false

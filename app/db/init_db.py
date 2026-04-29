@@ -25,13 +25,15 @@ load_dotenv()
 
 from sqlalchemy import text
 
-from app.db.database import engine, Base, SessionLocal
+from app.db.database import Base, SessionLocal, ensure_database_connected
 from app.db.models import Alert, User
 from app.services.auth_service import hash_password
 
 
 def create_tables():
-    if engine is None:
+    try:
+        engine = ensure_database_connected()
+    except Exception:
         # During development it's useful to allow the app to start even when
         # PostgreSQL is not reachable (e.g. running without DB). The rest of
         # the application will handle DB absence gracefully; avoid exiting
@@ -71,6 +73,11 @@ def seed_admin(db):
 
 def init():
     create_tables()
+    try:
+        ensure_database_connected()
+    except Exception:
+        print("[init_db] WARNING: No database connection. Skipping admin seed.")
+        return
     db = SessionLocal()
     try:
         seed_admin(db)
