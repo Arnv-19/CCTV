@@ -31,13 +31,13 @@ export default function ReportsPanel() {
   const [alerts,  setAlerts]  = useState([])
   const [summary, setSummary] = useState(null)
   const [filters, setFilters] = useState({
-    camera_id: '', model_name: '', date_from: '', date_to: '', acknowledged: '',
+    camera_id: '', date_from: '', date_to: '',
   })
   const [page,    setPage]    = useState(1)
   const [total,   setTotal]   = useState(0)
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
-  const PAGE_SIZE = 20
+  const PAGE_SIZE = 10
   const reportDate = filters.date_to || filters.date_from || new Date().toISOString().slice(0, 10)
 
   const fetchAlerts = useCallback(async () => {
@@ -123,6 +123,9 @@ export default function ReportsPanel() {
       setError(null)
       await api.sendDailyReportWhatsApp({
         report_date: reportDate,
+        camera_id: filters.camera_id ? Number(filters.camera_id) : undefined,
+        date_from: filters.date_from || undefined,
+        date_to: filters.date_to || undefined,
         include_pdf: true,
         include_excel: true,
       })
@@ -154,44 +157,50 @@ export default function ReportsPanel() {
 
       {/* Filters */}
       <form onSubmit={handleFilter}
-        className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3 sm:space-y-0 sm:flex sm:flex-wrap sm:gap-3 sm:items-end">
-        <div className="grid grid-cols-2 sm:contents gap-3">
+        className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-100">Filter Alerts</h3>
+            <p className="text-xs text-slate-400">Camera aur date range ke hisaab se alerts dekhein.</p>
+          </div>
+          <div className="text-xs text-slate-400">
+            Showing {alerts.length} of {total} alerts
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="space-y-1">
             <label className="text-xs text-slate-400">Camera ID</label>
-            <input className={`${inputCls} w-full sm:w-28`} type="number" placeholder="All"
+            <input className={`${inputCls} w-full`} type="number" placeholder="All cameras"
               value={filters.camera_id} onChange={e => setFilters({ ...filters, camera_id: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-slate-400">Model</label>
-            <input className={`${inputCls} w-full sm:w-40`} placeholder="All"
-              value={filters.model_name} onChange={e => setFilters({ ...filters, model_name: e.target.value })} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-slate-400">From</label>
-            <input className={`${inputCls} w-full`} type="date"
+            <label className="text-xs text-slate-400">Date From</label>
+            <input className={`${inputCls} w-full color-scheme-dark`} type="date"
               value={filters.date_from} onChange={e => setFilters({ ...filters, date_from: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-slate-400">To</label>
-            <input className={`${inputCls} w-full`} type="date"
+            <label className="text-xs text-slate-400">Date To</label>
+            <input className={`${inputCls} w-full color-scheme-dark`} type="date"
               value={filters.date_to} onChange={e => setFilters({ ...filters, date_to: e.target.value })} />
           </div>
+          <div className="flex items-end gap-2">
+            <button type="submit"
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+              Apply Filter
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFilters({ camera_id: '', date_from: '', date_to: '' })
+                setPage(1)
+              }}
+              className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+            >
+              Reset
+            </button>
+          </div>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs text-slate-400">Acknowledged</label>
-          <select className={`${inputCls} w-full sm:w-36`}
-            value={filters.acknowledged}
-            onChange={e => setFilters({ ...filters, acknowledged: e.target.value })}>
-            <option value="">All</option>
-            <option value="false">Pending</option>
-            <option value="true">Acknowledged</option>
-          </select>
-        </div>
-        <div className="flex gap-2 sm:contents">
-          <button type="submit"
-            className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
-            Filter
-          </button>
+        <div className="flex gap-2 flex-wrap">
           <button type="button" onClick={handleDailyPdf}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-rose-700 hover:bg-rose-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
             <FileText size={14} /> Daily PDF
@@ -277,12 +286,14 @@ export default function ReportsPanel() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-3 text-sm">
+        <div className="flex items-center justify-between gap-3 text-sm bg-slate-800 border border-slate-700 rounded-xl px-4 py-3">
+          <span className="text-slate-400">
+            Page {page} of {totalPages}
+          </span>
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
             className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors disabled:opacity-40">
             Prev
           </button>
-          <span className="text-slate-400">Page {page} / {totalPages}</span>
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
             className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors disabled:opacity-40">
             Next

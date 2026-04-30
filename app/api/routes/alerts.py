@@ -12,7 +12,7 @@ GET    /api/alerts/export     Export filtered alerts as CSV download
 
 import csv
 import io
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -70,6 +70,9 @@ class AlertOut(BaseModel):
 
 class DailyReportWhatsAppRequest(BaseModel):
     report_date: Optional[date] = None
+    camera_id: Optional[int] = None
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
     to: Optional[str] = None
     include_pdf: bool = True
     include_excel: bool = True
@@ -108,6 +111,18 @@ def _apply_filters(query, camera_id, model_name, date_from, date_to, acknowledge
 
 def _resolve_report_date(report_date: Optional[date]) -> date:
     return report_date or datetime.now().date()
+
+
+def _date_to_start_dt(value: Optional[date]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.combine(value, time.min)
+
+
+def _date_to_end_dt(value: Optional[date]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.combine(value, time.max)
 
 
 # ---------------------------------------------------------------------------
@@ -310,8 +325,25 @@ def send_daily_report_whatsapp(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    resolved_date = _resolve_report_date(body.report_date)
-    alerts = get_daily_alerts_query(db, resolved_date).all()
+    has_filters = any(value not in (None, "") for value in (body.camera_id, body.date_from, body.date_to))
+    resolved_date = _resolve_report_date(body.date_to or body.date_from or body.report_date)
+
+    if has_filters:
+        alerts = (
+            _apply_filters(
+                db.query(Alert),
+                body.camera_id,
+                None,
+                _date_to_start_dt(body.date_from),
+                _date_to_end_dt(body.date_to),
+                None,
+            )
+            .order_by(Alert.triggered_at.asc(), Alert.camera_id.asc(), Alert.id.asc())
+            .all()
+        )
+    else:
+        alerts = get_daily_alerts_query(db, resolved_date).all()
+
     if not alerts and not body.use_dummy_data:
         raise HTTPException(400, f"No alert data found in DB for {resolved_date.isoformat()}.")
     rows = build_daily_report_rows(
