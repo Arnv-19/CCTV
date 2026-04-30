@@ -102,9 +102,9 @@ camera_titles:
 - Camera 4
 class_file: data/class_names.yaml
 confidence_threshold: 0.18
-detection_frame_width: 960
-detection_frame_height: 720
-yolo_imgsz: 960
+detection_frame_width: 640
+detection_frame_height: 480
+yolo_imgsz: 640
 esp_ip: ''
 gloves_model_path: weights/helmet_model.pt
 model_path: weights/ppe_final_model.pt
