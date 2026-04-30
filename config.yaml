@@ -10,8 +10,8 @@
 # # class_file: data/class_names.yaml
 # # confidence_threshold: 0.25
 # # esp_ip: ''
-# # gloves_model_path: weights/ppe_final_model.pt
-# # model_path: weights/ppe_final_model.pt
+# # gloves_model_path: weights/best (3).pt
+# # model_path: weights/best (3).pt
 # # mqtt_broker: ''
 # # mqtt_client_id: skycctv-ai
 # # mqtt_password: ''
@@ -20,8 +20,8 @@
 # # mqtt_retain: false
 # # mqtt_topic: skycctv/alarm
 # # mqtt_username: ''
-# # person_model_path: weights/person_model.pt
-# # ppe_model_path: weights/ppe_final_model.pt
+# # person_model_path: weights/best (3).pt
+# # ppe_model_path: weights/best (3).pt
 # # use_wifi: false
 
 
@@ -89,7 +89,6 @@ alarm_cooldown_sec: 30
 alarm_http_token: ''
 alarm_transport: usb
 burglar_test_sound: false
-snapshot_cooldown_sec: 120
 camera_feeds:
 - rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=26&subtype=0
 - rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=28&subtype=0
@@ -106,8 +105,8 @@ detection_frame_width: 640
 detection_frame_height: 480
 yolo_imgsz: 640
 esp_ip: ''
-gloves_model_path: weights/helmet_model.pt
-model_path: weights/ppe_final_model.pt
+gloves_model_path: weights/best (3).pt
+model_path: weights/best (3).pt
 mqtt_broker: ''
 mqtt_client_id: skycctv-ai
 mqtt_password: ''
@@ -116,6 +115,6 @@ mqtt_qos: 1
 mqtt_retain: false
 mqtt_topic: skycctv/alarm
 mqtt_username: ''
-person_model_path: weights/ppe_final_model.pt
-ppe_model_path: weights/ppe_model.pt
+person_model_path: weights/best (3).pt
+ppe_model_path: weights/best (3).pt
 use_wifi: false
