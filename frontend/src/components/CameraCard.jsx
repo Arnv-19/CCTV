@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Activity, Tv, Crop } from 'lucide-react'
 import { api } from '../api/client'
 
-export default function CameraCard({ camera, running, streamEpoch, onEditROI }) {
+export default function CameraCard({ camera, running, streamEpoch, onEditROI, fitToScreen = false }) {
   const [imgError, setImgError] = useState(false)
   const [imgLoaded, setImgLoaded] = useState(false)
   const [streamAttempt, setStreamAttempt] = useState(0)
@@ -20,7 +20,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
 
   useEffect(() => {
     if (!running || !imgError) return
-    const id = setTimeout(() => setImgError(false), 2500)
+    const id = setTimeout(() => setImgError(false), 800)
     return () => clearTimeout(id)
   }, [imgError, running, streamEpoch, camera.id])
 
@@ -31,11 +31,14 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
 
   const cameraReady = camera.status === 'running'
   const shouldMountStream = running && cameraReady && !imgError
+  const streamClass = fitToScreen
+    ? 'relative bg-black aspect-video sm:aspect-auto sm:flex-1 sm:min-h-0 overflow-hidden'
+    : 'relative bg-black aspect-video overflow-hidden'
 
   return (
-    <div className="relative bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col">
+    <div className="relative min-h-0 bg-slate-800 rounded-lg overflow-hidden border border-slate-700 flex flex-col">
       {/* Stream */}
-      <div className="relative bg-black aspect-video overflow-hidden">
+      <div className={streamClass}>
         {shouldMountStream ? (
           <>
             <img
@@ -80,7 +83,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 bg-slate-800 border-t border-slate-700 text-xs">
+      <div className="shrink-0 px-3 py-1.5 bg-slate-800 border-t border-slate-700 text-xs">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
@@ -115,9 +118,8 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI }) 
         </div>
 
         {resources && (
-          <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-400">
+          <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-400">
             <span>CPU {resources.thread_cpu_percent_single_core}% of one core</span>
-            <span>Buffer {resources.frame_buffer_mb} MB</span>
           </div>
         )}
       </div>

@@ -77,6 +77,19 @@ export default function App() {
     return () => window.removeEventListener('skycctvai:unauthorized', handler)
   }, [logout, showToast])
 
+  // Reconnect streams when returning from a background browser tab or window blur.
+  // Browsers throttle/kill background MJPEG connections; bumping streamEpoch forces a fresh reconnect.
+  useEffect(() => {
+    const bump = () => setStreamEpoch(n => n + 1)
+    const onVisible = () => { if (document.visibilityState === 'visible') bump() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', bump)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', bump)
+    }
+  }, [])
+
   const fetchCameras = useCallback(async () => {
     try {
       const [cameraData, metricsData] = await Promise.all([
@@ -228,7 +241,8 @@ export default function App() {
 
       {/* Content */}
       <main className="flex-1 overflow-hidden">
-        {tab === 'live'    && (
+        {/* LiveView is always mounted so MJPEG connections survive tab switches. */}
+        <div className={tab === 'live' ? 'h-full' : 'hidden'}>
           <LiveView
             cameras={cameras}
             running={running}
@@ -236,7 +250,7 @@ export default function App() {
             systemMetrics={resourceMetrics}
             onEditROI={setRoiCameraId}
           />
-        )}
+        </div>
         {tab === 'config'  && (
           <ConfigPanel
             onSaved={() => { showToast('Config saved'); fetchCameras() }}

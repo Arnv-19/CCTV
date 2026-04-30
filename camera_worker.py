@@ -70,13 +70,18 @@ def save_snapshot(frame, cam_id: int, snapshot_dir: str) -> str | None:
         return None
 
 
-def log_violation_file(cam_id: int, frame_index: int, violation_rate: float):
+def log_violation_file(
+    cam_id: int,
+    frame_index: int,
+    violation_rate: float,
+    violation_type: str = "violation",
+):
     """Append a violation line to the flat-file log (kept for backward compat)."""
     ensure_dir("logs")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open("logs/alerts.log", "a") as f:
         f.write(
-            f"[{now}] Camera {cam_id} | Frame {frame_index} | No helmet | Rate: {violation_rate:.2f}%\n"
+            f"[{now}] Camera {cam_id} | Frame {frame_index} | {violation_type} | Rate: {violation_rate:.2f}%\n"
         )
 
 
@@ -174,6 +179,10 @@ def camera_loop(
     assigned_buzzers: list = None,  # list of buzzer dicts fetched from DB at start
     alert_queue: Queue = None,      # queue to AlertWriter for non-blocking DB logging
     snapshot_dir: str = "snapshots",
+    snapshot_cooldown: float = 120,
+    detection_width: int = 960,
+    detection_height: int = 720,
+    yolo_imgsz: int = 960,
     enabled_models: list = None,    # list of model_name strings enabled for this camera
     violation_classes: list = None, # PPE classes that trigger an alarm
     safe_classes: list = None,      # PPE classes shown with green bounding box
@@ -191,13 +200,62 @@ def camera_loop(
       - Falls back to legacy alarm.py transport if no DB buzzers are assigned
     """
 
-    # Build sets for O(1) look-ups; fall back to legacy single-class args
+    def _class_key(class_name: str) -> str:
+        return str(class_name or "").strip().lower().replace("_", "-").replace(" ", "-")
+
+    # Build sets for O(1) look-ups; fall back to legacy single-class args.
+    # Model label spelling varies between weights (e.g. NO-Hardhat vs no-helmet),
+    # so alarm decisions use normalized aliases instead of exact display labels.
     _violation_set: set = set(violation_classes) if violation_classes else (
         {no_helmet_class} if no_helmet_class else set()
     )
     _safe_set: set = set(safe_classes) if safe_classes else (
         {helmet_class} if helmet_class else set()
     )
+    _violation_keys: set = {_class_key(c) for c in _violation_set}
+    _violation_keys.update({
+        "no-hardhat",
+        "no-hat",
+        "no-helmet",
+        "no-boot",
+        "no-boots",
+        "no-shoe",
+        "no-shoes",
+        "no-gloves",
+        "bare-hand",
+        "bare-hands",
+        "no-safety-vest",
+        "no-vest",
+        "no-goggles",
+        "no-glasses",
+        # Mask detection disabled for now.
+        # "no-mask",
+        "fire",
+    })
+    _safe_keys: set = {_class_key(c) for c in _safe_set}
+    _safe_keys.update({
+        "hardhat",
+        "hat",
+        "helmet",
+        "boot",
+        "boots",
+        "shoe",
+        "shoes",
+        "gloves",
+        "safety-vest",
+        "vest",
+        "goggles",
+        "glasses",
+        # Mask detection disabled for now.
+        # "mask",
+    })
+    _disabled_class_keys = {"mask", "no-mask"}
+
+    def _is_violation_class(class_name: str) -> bool:
+        return _class_key(class_name) in _violation_keys
+
+    def _is_safe_class(class_name: str) -> bool:
+        return _class_key(class_name) in _safe_keys
 
     # Per-camera enabled model filtering.
     # None = no DB config → all models run (backward-compat default).
@@ -215,21 +273,22 @@ def camera_loop(
         "no_helmet":        "NH",
         "helmet":           "",
         # Vest
-        "NO-Safety Vest":   "No Vest",
-        "Safety Vest":      "Vest",
-        "no_vest":          "No Vest",
-        "vest":             "Vest",
+        "NO-Safety Vest":   "NV",
+        "Safety Vest":      "",
+        "no_vest":          "NV",
+        "vest":             "",
         # Goggles / glasses
-        "NO-Goggles":       "No Goggles",
-        "Goggles":          "Goggles",
+        "NO-Goggles":       "NGL",
+        "Goggles":          "",
         # Gloves
-        "Gloves":           "Gloves",
-        "NO-Gloves":        "No Gloves",
-        "bare_hand":        "Bare Hand",
-        "bare_hands":       "Bare Hands",
-        # Mask
-        "Mask":             "Mask",
-        "NO-Mask":          "No Mask",
+        "Gloves":           "",
+        "NO-Gloves":        "NGO",
+        "no-gloves":        "NGO",
+        "bare_hand":        "NGO",
+        "bare_hands":       "NGO",
+        # Mask detection disabled for now.
+        # "Mask":             "Mask",
+        # "NO-Mask":          "No Mask",
     }
 
     # Map each detection class name to its logical model name.
@@ -261,15 +320,17 @@ def camera_loop(
         "goggles":          "glasses_detection",
 
         # Gloves
+        "no-gloves":        "gloves_detection",
         "no_gloves":        "gloves_detection",
         "gloves":           "gloves_detection",
+        "bare-hand":        "gloves_detection",
         "bare_hand":        "gloves_detection",
         "bare_hands":       "gloves_detection",
 
-        # Mask
-        "no-mask":          "mask_detection",
-        "no_mask":          "mask_detection",
-        "mask":             "mask_detection",
+        # Mask detection disabled for now.
+        # "no-mask":          "mask_detection",
+        # "no_mask":          "mask_detection",
+        # "mask":             "mask_detection",
 
         # Fire
         "fire":             "fire_detection",
@@ -333,12 +394,16 @@ def camera_loop(
 
     frame_count = 0
     violations  = 0
-    last_alarm_time = 0
+    last_alarm_times: dict[str, float] = {}
+    last_snapshot_times: dict[str, float] = {}
     reconnect_attempts = 0
     max_reconnect_attempts = 10
     last_burglar_alarm_time = 0   # separate cooldown for burglar alarm events
 
-    RESIZE_DIM = (640, 480)
+    RESIZE_DIM = (
+        max(320, int(detection_width or 960)),
+        max(240, int(detection_height or 720)),
+    )
 
      # ── KCF tracker state for burglar alarm ───────────────────────────────
     ba_tracker           = None   # cv2.TrackerKCF instance, or None when idle
@@ -429,14 +494,23 @@ def camera_loop(
             return inter_area / union_area
 
 
-        detections = run_detection(model, resized, threshold)
-        # Gloves model — only run if gloves_detection is enabled for this camera
-        gloves_detections = run_detection(gloves_model, resized, threshold) if _run_gloves else []
+        detections = run_detection(model, resized, threshold, imgsz=yolo_imgsz)
+        # Gloves model — reuse main detections when both features use the same
+        # YOLO instance, otherwise run the dedicated gloves model.
+        if _run_gloves:
+            gloves_detections = detections if gloves_model is model else run_detection(
+                gloves_model, resized, threshold, imgsz=yolo_imgsz
+            )
+        else:
+            gloves_detections = []
 
         # Apply per-camera model filtering once so disabled models are neither
         # considered for alarms nor rendered in the live stream overlay.
         filtered_detections = []
-        for det in detections + gloves_detections:
+        all_detections = detections if gloves_detections is detections else detections + gloves_detections
+        for det in all_detections:
+            if _class_key(det.get("class")) in _disabled_class_keys:
+                continue
             model_name = _model_for_class(det["class"])
             if _enabled_set is not None and model_name and model_name not in _enabled_set:
                 continue
@@ -456,52 +530,68 @@ def camera_loop(
             )
 
         # ── violation handling ─────────────────────────────────────────────
-        violation_found = False
+        def record_violation(det: dict, violation_type: str | None = None) -> bool:
+            nonlocal violations
+
+            violation_name = violation_type or det.get("class", "violation")
+            violation_key = _class_key(violation_name)
+            now = time.time()
+            effective_cooldown = max(0.0, float(cooldown or 0))
+            if now - last_alarm_times.get(violation_key, 0) <= effective_cooldown:
+                return False
+
+            last_alarm_times[violation_key] = now
+            violations += 1
+
+            snapshot_key = violation_key
+            snapshot_interval = max(0.0, float(snapshot_cooldown or 0))
+            if now - last_snapshot_times.get(snapshot_key, 0) > snapshot_interval:
+                snap_path = save_snapshot(resized, cam_id, snapshot_dir)
+                last_snapshot_times[snapshot_key] = now
+            else:
+                snap_path = None
+
+            buzzer_fired = False
+            if assigned_buzzers:
+                buzzer_fired = fire_buzzers(assigned_buzzers, cam_id)
+            else:
+                # Legacy path — use alarm.py global config
+                from alarm import trigger_alarm
+                trigger_alarm(
+                    cam_id, cooldown,
+                    use_wifi=use_wifi, esp_ip=esp_ip,
+                    transport=alarm_transport, token=alarm_http_token,
+                    mqtt_broker=mqtt_broker, mqtt_port=mqtt_port,
+                    mqtt_username=mqtt_username, mqtt_password=mqtt_password,
+                    mqtt_topic=mqtt_topic, mqtt_client_id=mqtt_client_id,
+                    mqtt_qos=mqtt_qos, mqtt_retain=mqtt_retain,
+                )
+                buzzer_fired = True
+
+            if alert_queue is not None:
+                alert_queue.put({
+                    "camera_id":        cam_id,
+                    "model_name":       "ppe_detection",
+                    "violation_type":   violation_name,
+                    "confidence_score": det.get("conf", 0.0),
+                    "snapshot_path":    snap_path,
+                    "buzzer_activated": buzzer_fired,
+                })
+
+            log_violation_file(
+                cam_id,
+                frame_count,
+                (violations / frame_count) * 100,
+                violation_name,
+            )
+            return True
+
+        logged_this_frame: set[str] = set()
         for det in filtered_detections:
-            if det["class"] in _violation_set:
-                now = time.time()
-
-                # Cooldown check — only count + act once per cooldown window
-                effective_cooldown = max(0.0, float(cooldown or 0))
-                if now - last_alarm_time > effective_cooldown:
-                    last_alarm_time = now
-                    violations += 1
-                    violation_found = True
-
-                    # Save snapshot
-                    snap_path = save_snapshot(resized, cam_id, snapshot_dir)
-
-                    # Fire buzzers (DB-assigned or legacy fallback)
-                    buzzer_fired = False
-                    if assigned_buzzers:
-                        buzzer_fired = fire_buzzers(assigned_buzzers, cam_id)
-                    else:
-                        # Legacy path — use alarm.py global config
-                        from alarm import trigger_alarm
-                        trigger_alarm(
-                            cam_id, cooldown,
-                            use_wifi=use_wifi, esp_ip=esp_ip,
-                            transport=alarm_transport, token=alarm_http_token,
-                            mqtt_broker=mqtt_broker, mqtt_port=mqtt_port,
-                            mqtt_username=mqtt_username, mqtt_password=mqtt_password,
-                            mqtt_topic=mqtt_topic, mqtt_client_id=mqtt_client_id,
-                            mqtt_qos=mqtt_qos, mqtt_retain=mqtt_retain,
-                        )
-                        buzzer_fired = True
-
-                    # Queue DB alert (non-blocking)
-                    if alert_queue is not None:
-                        alert_queue.put({
-                            "camera_id":        cam_id,
-                            "model_name":       "ppe_detection",
-                            "violation_type":   det["class"],
-                            "confidence_score": det["conf"],
-                            "snapshot_path":    snap_path,
-                            "buzzer_activated": buzzer_fired,
-                        })
-
-                    log_violation_file(cam_id, frame_count, (violations / frame_count) * 100)
-                break   # one violation event per frame
+            violation_key = _class_key(det.get("class"))
+            if _is_violation_class(det.get("class")) and violation_key not in logged_this_frame:
+                if record_violation(det):
+                    logged_this_frame.add(violation_key)
         
 
         # ── burglar alarm check (with KCF tracking) ───────────────────────
@@ -591,7 +681,7 @@ def camera_loop(
                         burglar_candidates = filtered_detections
                         if burglar_person_model is not None:
                             burglar_candidates = run_detection(
-                                burglar_person_model, resized, threshold
+                                burglar_person_model, resized, threshold, imgsz=yolo_imgsz
                             )
 
                         for det in burglar_candidates:
@@ -692,16 +782,37 @@ def camera_loop(
                     # Compliant helmet — skip box and label entirely
                     continue
 
+            # Vest compliance suppression
+            if any(k in cls_key for k in ("vest",)):
+                if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
+                    display_name = "NV"
+                else:
+                    continue
+
+            # Glasses / goggles compliance suppression
+            if any(k in cls_key for k in ("goggle", "glasses", "goggle")):
+                if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
+                    display_name = "NGL"
+                else:
+                    continue
+
+            # Gloves compliance suppression
+            if any(k in cls_key for k in ("glove",)):
+                if cls_key.startswith("no-") or "-no-" in cls_key or cls_key.startswith("without-"):
+                    display_name = "NGO"
+                else:
+                    continue
+
             if not display_name:
                 label = ""
-            elif display_name.upper() == "NH":
-                label = "NH"
+            elif display_name.upper() in ("NH", "NV", "NGO", "NGL"):
+                label = display_name.upper()
             else:
                 label = f"{display_name.upper()} {det['conf']:.2f}"
-            color = (0, 255, 0) if class_name in _safe_set else (0, 0, 255)
+            color = (0, 255, 0) if _is_safe_class(class_name) else (0, 0, 255)
 
-            # Draw NH slightly smaller to reduce visual dominance on the stream.
-            if label == "NH":
+            # Draw NH/NV/NGO/NGL slightly smaller to reduce visual dominance on the stream.
+            if label in ("NH", "NV", "NGO", "NGL"):
                 shrink_x = max(1, int((x2 - x1) * 0.12))
                 shrink_y = max(1, int((y2 - y1) * 0.12))
                 x1_draw = min(x2 - 1, x1 + shrink_x)
@@ -729,23 +840,49 @@ def camera_loop(
             hand_results = _mp_hands.detect(mp_image)
             if hand_results.hand_landmarks:
                 h, w = resized.shape[:2]
-                # Determine gloves status from best.pt for this frame
-                gloves_status = "Gloves"  # default: assume safe until model says otherwise
-                if gloves_detections:
-                    top = max(gloves_detections, key=lambda d: d["conf"])
-                    gloves_status = top["class"]
-                g_color = (0, 255, 0) if gloves_status in _safe_set else (0, 0, 255)
-                g_label = gloves_status.upper()
-                for hand_lm in hand_results.hand_landmarks:
-                    xs = [lm.x for lm in hand_lm]
-                    ys = [lm.y for lm in hand_lm]
-                    x1 = max(0, int(min(xs) * w) - 20)
-                    y1 = max(0, int(min(ys) * h) - 20)
-                    x2 = min(w, int(max(xs) * w) + 20)
-                    y2 = min(h, int(max(ys) * h) + 20)
-                    cv2.rectangle(resized, (x1, y1), (x2, y2), g_color, 2)
-                    cv2.putText(resized, g_label, (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, g_color, 2)
+                # Determine glove status only from glove-related model labels.
+                # The PPE model may also emit no-helmet/no-mask; those should not
+                # drive the hand overlay or the no-gloves DB alert.
+                glove_candidates = [
+                    d for d in gloves_detections
+                    if any(k in _class_key(d.get("class")) for k in ("glove", "bare-hand", "bare-hands"))
+                ]
+                glove_top = max(glove_candidates, key=lambda d: d.get("conf", 0.0)) if glove_candidates else None
+                gloves_worn = glove_top is not None and _is_safe_class(glove_top.get("class"))
+                # If hands are visible and the model does not positively say "gloves",
+                # treat the hand as a no-gloves violation. This keeps NGO logging
+                # aligned with the hand overlay instead of depending on a separate
+                # no-gloves class being emitted every frame.
+                gloves_missing = not gloves_worn
+
+                if gloves_missing:
+                    glove_violation_name = "no-gloves"
+                    glove_violation_key = _class_key(glove_violation_name)
+                    if glove_violation_key not in logged_this_frame:
+                        record_violation({
+                            "class": glove_violation_name,
+                            "conf": glove_top.get("conf", 0.0) if glove_top is not None else 0.5,
+                            "box": [0, 0, w, h],
+                        }, glove_violation_name)
+                        logged_this_frame.add(glove_violation_key)
+
+                    g_color = (0, 0, 255)
+                    for hand_lm in hand_results.hand_landmarks:
+                        xs = [lm.x for lm in hand_lm]
+                        ys = [lm.y for lm in hand_lm]
+                        x1 = max(0, int(min(xs) * w) - 20)
+                        y1 = max(0, int(min(ys) * h) - 20)
+                        x2 = min(w, int(max(xs) * w) + 20)
+                        y2 = min(h, int(max(ys) * h) + 20)
+                        shrink_x = max(1, int((x2 - x1) * 0.12))
+                        shrink_y = max(1, int((y2 - y1) * 0.12))
+                        x1d = min(x2 - 1, x1 + shrink_x)
+                        y1d = min(y2 - 1, y1 + shrink_y)
+                        x2d = max(x1d + 1, x2 - shrink_x)
+                        y2d = max(y1d + 1, y2 - shrink_y)
+                        cv2.rectangle(resized, (x1d, y1d), (x2d, y2d), g_color, 1)
+                        cv2.putText(resized, "NGO", (x1d, y1d - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, g_color, 1)
 
         fps = 1 / (time.time() - start + 1e-5)
         stat_text = f"Cam {cam_id} | FPS: {fps:.1f} | Violations: {violations}"

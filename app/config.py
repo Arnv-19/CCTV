@@ -48,10 +48,17 @@ def get_config() -> dict:
     cfg.setdefault("ppe_model_path", "weights/ppe_model.pt")
     cfg.setdefault("class_file", "data/class_names.yaml")
     cfg.setdefault("confidence_threshold", 0.25)
+    # Higher values preserve distant people/PPE details but cost more CPU/GPU.
+    cfg.setdefault("detection_frame_width", 640)
+    cfg.setdefault("detection_frame_height", 480)
+    cfg.setdefault("yolo_imgsz", 640)
 
     # --- Alarm cooldown ---
     # Minimum seconds between alarms per camera. 0 = no rate limiting.
     cfg.setdefault("alarm_cooldown_sec", 10)
+    # Minimum seconds between saved violation images per camera/violation type.
+    # Alerts can still be logged while snapshot_path is null during this window.
+    cfg.setdefault("snapshot_cooldown_sec", 120)
 
     # --- Local test sound ---
     # If True, play a local machine sound when burglar alarm triggers.

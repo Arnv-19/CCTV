@@ -83,11 +83,10 @@ def _fetch_enabled_models_for_camera(cam_id: int) -> list | None:
             - explicitly enabled custom models are included
     """
     try:
-        from app.db.database import SessionLocal
+        from app.db.database import SessionLocal, ensure_database_connected
         from app.db.models import CameraModel
 
-        if SessionLocal is None:
-            return None
+        ensure_database_connected()
 
         with SessionLocal() as db:
             rows = db.query(CameraModel).filter(CameraModel.camera_id == cam_id).all()
@@ -127,11 +126,10 @@ def _fetch_buzzers_for_camera(cam_id: int) -> list:
     Returns [] if the DB is unavailable or no buzzers are assigned.
     """
     try:
-        from app.db.database import SessionLocal
+        from app.db.database import SessionLocal, ensure_database_connected
         from app.db.models import CameraBuzzer
 
-        if SessionLocal is None:
-            return []
+        ensure_database_connected()
 
         with SessionLocal() as db:
             rows = (
@@ -169,7 +167,7 @@ def _alert_writer_loop(queue: Queue):
     Pushes _STOP_SENTINEL (None) to terminate.
     """
     try:
-        from app.db.database import SessionLocal
+        from app.db.database import SessionLocal, ensure_database_connected
         from app.db.models import Alert,BurglarAlarmEvent
     except Exception as e:
         print(f"[AlertWriter] Import error — DB writes disabled: {e}")
@@ -185,8 +183,7 @@ def _alert_writer_loop(queue: Queue):
             break
 
         try:
-            if SessionLocal is None:
-                continue
+            ensure_database_connected()
             with SessionLocal() as db:
                 # alert = Alert(
                 #     camera_id        = item["camera_id"],
@@ -225,13 +222,24 @@ def _alert_writer_loop(queue: Queue):
                         violation_type   = item.get("violation_type", "no_helmet"),
                         confidence_score = item.get("confidence_score", 0.0),
                         snapshot_path    = item.get("snapshot_path"),
-                        triggered_at     = datetime.utcnow(),
+                        triggered_at     = _now_ist_naive(),
                         buzzer_activated = item.get("buzzer_activated", False),
                     )
                     db.add(alert)
                 db.commit()
         except Exception as e:
-            print(f"[AlertWriter] Failed to write alert to DB: {e}")
+            attempts = int(item.get("_db_write_attempts", 0)) + 1
+            item["_db_write_attempts"] = attempts
+            print(
+                f"[AlertWriter] Failed to write alert to DB "
+                f"(attempt {attempts}/5, camera={item.get('camera_id')}, "
+                f"type={item.get('violation_type')}): {e}"
+            )
+            if attempts < 5:
+                time.sleep(2)
+                queue.put(item)
+            else:
+                print(f"[AlertWriter] Dropping alert after 5 DB write failures: {item}")
 
 
 class CameraManager:
@@ -398,7 +406,12 @@ class CameraManager:
         gloves_model_path = cfg.get("gloves_model_path", "")
         if gloves_model_path:
             gloves_abs = _resolve_local_path(gloves_model_path)
-            if gloves_abs.exists() and self.gloves_model_path_loaded != gloves_model_path:
+            selected_model_abs = _resolve_local_path(selected_model_path) if selected_model_path else None
+            if selected_model_abs and gloves_abs.resolve() == selected_model_abs.resolve():
+                self.gloves_model = self.model
+                self.gloves_model_path_loaded = gloves_model_path
+                print("[CameraManager] Gloves model reusing main PPE model.")
+            elif gloves_abs.exists() and self.gloves_model_path_loaded != gloves_model_path:
                 try:
                     # Load gloves model using absolute path to avoid CWD issues.
                     self.gloves_model = load_model(str(gloves_abs))
@@ -428,7 +441,11 @@ class CameraManager:
         mqtt_qos          = cfg.get("mqtt_qos", 1)
         mqtt_retain       = cfg.get("mqtt_retain", False)
         cooldown          = cfg.get("alarm_cooldown_sec", 5)
+        snapshot_cooldown = cfg.get("snapshot_cooldown_sec", 120)
         threshold         = cfg.get("confidence_threshold", 0.25)
+        detection_width   = cfg.get("detection_frame_width", 640)
+        detection_height  = cfg.get("detection_frame_height", 480)
+        yolo_imgsz        = cfg.get("yolo_imgsz", 640)
         burglar_test_sound = cfg.get("burglar_test_sound", False)
 
 
@@ -460,6 +477,10 @@ class CameraManager:
                 safe_classes=self.safe_classes,
                 gloves_model=self.gloves_model,
                 person_model=self.person_model,
+                snapshot_cooldown=snapshot_cooldown,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                yolo_imgsz=yolo_imgsz,
                 burglar_test_sound=burglar_test_sound,
             )
             started_any = True
@@ -477,6 +498,10 @@ class CameraManager:
                 safe_classes=self.safe_classes,
                 gloves_model=self.gloves_model,
                 person_model=self.person_model,
+                snapshot_cooldown=snapshot_cooldown,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                yolo_imgsz=yolo_imgsz,
                 burglar_test_sound=burglar_test_sound,
             )
         else:
@@ -534,7 +559,11 @@ class CameraManager:
             safe_classes=self.safe_classes,
             gloves_model=self.gloves_model,
             enabled_models=_fetch_enabled_models_for_camera(cam_id),
-            
+            snapshot_cooldown=cfg.get("snapshot_cooldown_sec", 120),
+            detection_width=cfg.get("detection_frame_width", 640),
+            detection_height=cfg.get("detection_frame_height", 480),
+            yolo_imgsz=cfg.get("yolo_imgsz", 640),
+             
 
         )
 
@@ -581,6 +610,10 @@ class CameraManager:
         mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
         # violation_classes=None, safe_classes=None, gloves_model=None,
         violation_classes=None, safe_classes=None, gloves_model=None, person_model=None,
+        snapshot_cooldown=120,
+        detection_width=960,
+        detection_height=720,
+        yolo_imgsz=960,
         burglar_test_sound=False,
     ):
         """
@@ -633,6 +666,10 @@ class CameraManager:
                 # DB-backed features
                 assigned_buzzers=assigned_buzzers,
                 alert_queue=self.alert_queue,
+                snapshot_cooldown=snapshot_cooldown,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                yolo_imgsz=yolo_imgsz,
                 enabled_models=enabled_models,
                 violation_classes=violation_classes or self.violation_classes,
                 safe_classes=safe_classes or self.safe_classes,
@@ -777,11 +814,11 @@ class CameraManager:
                 "vms_memory_bytes": process_memory.vms,
                 "vms_memory_mb": round(process_memory.vms / (1024 * 1024), 2),
             },
-            "cameras": cameras,
-            "notes": [
-                "Per-camera CPU is estimated from each camera worker thread between polls.",
-                "Per-camera memory is reported as live MJPEG frame-buffer size because Python thread memory cannot be isolated accurately.",
-            ],
+            # "cameras": cameras,
+            # "notes": [
+            #     "Per-camera CPU is estimated from each camera worker thread between polls.",
+            #     "Per-camera memory is reported as live MJPEG frame-buffer size because Python thread memory cannot be isolated accurately.",
+            # ],
         }
 
     def get_camera_statuses(self) -> list:
