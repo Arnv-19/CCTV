@@ -443,9 +443,9 @@ class CameraManager:
         cooldown          = cfg.get("alarm_cooldown_sec", 5)
         snapshot_cooldown = cfg.get("snapshot_cooldown_sec", 120)
         threshold         = cfg.get("confidence_threshold", 0.25)
-        detection_width   = cfg.get("detection_frame_width", 960)
-        detection_height  = cfg.get("detection_frame_height", 720)
-        yolo_imgsz        = cfg.get("yolo_imgsz", 960)
+        detection_width   = cfg.get("detection_frame_width", 640)
+        detection_height  = cfg.get("detection_frame_height", 480)
+        yolo_imgsz        = cfg.get("yolo_imgsz", 640)
         burglar_test_sound = cfg.get("burglar_test_sound", False)
 
 
@@ -560,9 +560,9 @@ class CameraManager:
             gloves_model=self.gloves_model,
             enabled_models=_fetch_enabled_models_for_camera(cam_id),
             snapshot_cooldown=cfg.get("snapshot_cooldown_sec", 120),
-            detection_width=cfg.get("detection_frame_width", 960),
-            detection_height=cfg.get("detection_frame_height", 720),
-            yolo_imgsz=cfg.get("yolo_imgsz", 960),
+            detection_width=cfg.get("detection_frame_width", 640),
+            detection_height=cfg.get("detection_frame_height", 480),
+            yolo_imgsz=cfg.get("yolo_imgsz", 640),
              
 
         )
