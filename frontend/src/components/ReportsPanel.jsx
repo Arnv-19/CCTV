@@ -33,19 +33,35 @@ export default function ReportsPanel() {
   const [filters, setFilters] = useState({
     camera_id: '', date_from: '', date_to: '',
   })
+  const [appliedFilters, setAppliedFilters] = useState({
+    camera_id: '', date_from: '', date_to: '',
+  })
   const [page,    setPage]    = useState(1)
   const [total,   setTotal]   = useState(0)
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
+  const [success, setSuccess] = useState('')
   const PAGE_SIZE = 10
-  const reportDate = filters.date_to || filters.date_from || new Date().toISOString().slice(0, 10)
+  const reportDate = appliedFilters.date_to || appliedFilters.date_from || new Date().toISOString().slice(0, 10)
+  const reportParams = {
+    report_date: reportDate,
+    camera_id: appliedFilters.camera_id ? Number(appliedFilters.camera_id) : undefined,
+    date_from: appliedFilters.date_from || undefined,
+    date_to: appliedFilters.date_to || undefined,
+    use_dummy_data: false,
+  }
+  const reportFileLabel = appliedFilters.date_from && appliedFilters.date_to
+    ? (appliedFilters.date_from === appliedFilters.date_to
+        ? appliedFilters.date_from
+        : `${appliedFilters.date_from}_to_${appliedFilters.date_to}`)
+    : (appliedFilters.date_to || appliedFilters.date_from || reportDate)
 
   const fetchAlerts = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const params = {
-        ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '')),
+        ...Object.fromEntries(Object.entries(appliedFilters).filter(([, v]) => v !== '')),
         page,
         limit: PAGE_SIZE,
       }
@@ -60,7 +76,7 @@ export default function ReportsPanel() {
       }
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
-  }, [filters, page])
+  }, [appliedFilters, page])
 
   const fetchSummary = useCallback(async () => {
     try { setSummary(await api.getAlertSummary()) }
@@ -69,10 +85,21 @@ export default function ReportsPanel() {
 
   useEffect(() => { fetchAlerts(); fetchSummary() }, [fetchAlerts, fetchSummary])
 
+  useEffect(() => {
+    if (!success) return undefined
+    const timer = window.setTimeout(() => setSuccess(''), 3000)
+    return () => window.clearTimeout(timer)
+  }, [success])
+
   const handleFilter = (e) => {
     e.preventDefault()
+    setSuccess('')
     setPage(1)
-    fetchAlerts()
+    const normalized = { ...filters }
+    if (normalized.date_from && !normalized.date_to) normalized.date_to = normalized.date_from
+    if (normalized.date_to && !normalized.date_from) normalized.date_from = normalized.date_to
+    setFilters(normalized)
+    setAppliedFilters(normalized)
   }
 
   const handleAck = async (id) => {
@@ -82,7 +109,7 @@ export default function ReportsPanel() {
 
   const handleExport = async () => {
     try {
-      const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== ''))
+      const params = Object.fromEntries(Object.entries(appliedFilters).filter(([, v]) => v !== ''))
       const res = await api.exportAlertsCsv(params)
       const blob = res.data
       const url = URL.createObjectURL(blob)
@@ -105,15 +132,15 @@ export default function ReportsPanel() {
 
   const handleDailyPdf = async () => {
     try {
-      const res = await api.exportDailyReportPdf(reportDate, false)
-      downloadBlob(res.data, `daily_alert_report_${reportDate}.pdf`)
+      const res = await api.exportDailyReportPdf(reportParams)
+      downloadBlob(res.data, `daily_alert_report_${reportFileLabel}.pdf`)
     } catch (e) { setError(e.message) }
   }
 
   const handleDailyExcel = async () => {
     try {
-      const res = await api.exportDailyReportExcel(reportDate, false)
-      downloadBlob(res.data, `daily_alert_report_${reportDate}.xlsx`)
+      const res = await api.exportDailyReportExcel(reportParams)
+      downloadBlob(res.data, `daily_alert_report_${reportFileLabel}.xlsx`)
     } catch (e) { setError(e.message) }
   }
 
@@ -121,16 +148,15 @@ export default function ReportsPanel() {
     try {
       setLoading(true)
       setError(null)
+      setSuccess('')
       await api.sendDailyReportWhatsApp({
-        report_date: reportDate,
-        camera_id: filters.camera_id ? Number(filters.camera_id) : undefined,
-        date_from: filters.date_from || undefined,
-        date_to: filters.date_to || undefined,
+        ...reportParams,
         include_pdf: true,
         include_excel: true,
       })
       await fetchAlerts()
       await fetchSummary()
+      setSuccess('Report sent to WhatsApp successfully.')
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
@@ -142,6 +168,12 @@ export default function ReportsPanel() {
       {error && (
         <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
+        </div>
+      )}
+      {success && (
+        <div className="bg-emerald-900/30 border border-emerald-700 text-emerald-300 rounded-lg px-4 py-3 text-sm flex items-center gap-2">
+          <CheckCheck size={16} className="shrink-0" />
+          <span>{success}</span>
         </div>
       )}
 
@@ -191,7 +223,9 @@ export default function ReportsPanel() {
             <button
               type="button"
               onClick={() => {
+                setSuccess('')
                 setFilters({ camera_id: '', date_from: '', date_to: '' })
+                setAppliedFilters({ camera_id: '', date_from: '', date_to: '' })
                 setPage(1)
               }}
               className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors"

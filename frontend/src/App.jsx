@@ -202,18 +202,20 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={handleStartStop}
-            disabled={loading}
-            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
-              running
-                ? 'bg-red-600 hover:bg-red-700 text-white'
-                : 'bg-green-600 hover:bg-green-700 text-white'
-            } disabled:opacity-50`}
-          >
-            {running ? <Square size={14} /> : <Play size={14} />}
-            {loading ? '...' : running ? 'Stop' : 'Start'}
-          </button>
+          {tab === 'live' && (
+            <button
+              onClick={handleStartStop}
+              disabled={loading}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                running
+                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : 'bg-green-600 hover:bg-green-700 text-white'
+              } disabled:opacity-50`}
+            >
+              {running ? <Square size={14} /> : <Play size={14} />}
+              {loading ? '...' : running ? 'Stop' : 'Start'}
+            </button>
+          )}
           <button onClick={logout} title="Sign out"
             className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded-lg transition-colors">
             <LogOut size={16} />
