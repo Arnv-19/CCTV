@@ -33,6 +33,8 @@ from app.api.routes import cameras, config_routes, alarm, logs, stream
 # New routes
 from app.api.routes import auth, users, buzzers, camera_buzzers, camera_models, alerts as alerts_router, rois
 from app.api.routes import burglar_alarm as burglar_alarm_router
+from app.api.routes import ai_models as ai_models_router
+from app.api.routes import camera_assignments as camera_assignments_router
 
 
 class SafeStaticFiles(StaticFiles):
@@ -96,7 +98,9 @@ app.include_router(rois.router,            prefix="/api/rois",            tags=[
 
 # app.include_router(alerts_router.router,        prefix="/api/alerts",          tags=["alerts"])
 # app.include_router(rois.router,                 prefix="/api/rois",            tags=["rois"])
-app.include_router(burglar_alarm_router.router, prefix="/api/burglar-alarm",   tags=["burglar-alarm"])
+app.include_router(burglar_alarm_router.router,       prefix="/api/burglar-alarm",        tags=["burglar-alarm"])
+app.include_router(ai_models_router.router,           prefix="/api/ai-models",            tags=["ai-models"])
+app.include_router(camera_assignments_router.router,  prefix="/api/camera-assignments",   tags=["camera-assignments"])
 
 
 # ── Health check (used by CI/CD deploy pipeline) ──────────────────────────
