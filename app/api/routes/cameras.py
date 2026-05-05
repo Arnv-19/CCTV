@@ -1,35 +1,52 @@
 """
 app/api/routes/cameras.py
 --------------------------
-Camera management endpoints.
+Camera management endpoints — backed by the `cameras` DB table.
 
-CRUD operates on config.yaml (persisted). Start/stop operations
-control live camera threads via CameraManager without restarting the server.
+CRUD operations persist to the database. Start/stop operations control live
+camera processes via CameraManager without restarting the server.
 
 Endpoints:
   GET    /api/cameras/           List all cameras with live status
   POST   /api/cameras/           Add a new camera
-  PUT    /api/cameras/{id}       Update a camera's URL or title
-  DELETE /api/cameras/{id}       Remove a camera (stops thread if running)
+  PUT    /api/cameras/{id}       Update a camera
+  DELETE /api/cameras/{id}       Remove a camera (stops process if running)
   POST   /api/cameras/start      Start detection on all cameras
-  POST   /api/cameras/stop       Stop all camera threads
+  POST   /api/cameras/stop       Stop all camera processes
   POST   /api/cameras/{id}/start Start a single camera
   POST   /api/cameras/{id}/stop  Stop a single camera
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from typing import Optional
 
-from app.config import get_config, save_config
+from app.db.database import get_db
+from app.db.models import Camera
 from app.services.camera_manager import camera_manager
 
 router = APIRouter()
 
 
+class CameraCreate(BaseModel):
+    name: str
+    stream_url: str
+    location: Optional[str] = None
+    is_active: bool = True
+    ingestion_fps: int = 4
+    detection_width: int = 960
+    detection_height: int = 720
+
+
 class CameraUpdate(BaseModel):
-    url: str
-    title: Optional[str] = ""
+    name: Optional[str] = None
+    stream_url: Optional[str] = None
+    location: Optional[str] = None
+    is_active: Optional[bool] = None
+    ingestion_fps: Optional[int] = None
+    detection_width: Optional[int] = None
+    detection_height: Optional[int] = None
 
 
 @router.get("/")
@@ -45,66 +62,59 @@ def camera_metrics():
 
 
 @router.post("/")
-def add_camera(body: CameraUpdate):
-    """Append a new camera to config.yaml. Does not start it automatically."""
-    cfg = get_config()
-    cfg["camera_feeds"].append(body.url)
-    cfg["camera_titles"].append(body.title or f"Camera {len(cfg['camera_feeds']) - 1}")
-    save_config(cfg)
-    return {"message": "Camera added", "id": len(cfg["camera_feeds"]) - 1}
+def add_camera(body: CameraCreate, db: Session = Depends(get_db)):
+    """Insert a new camera row into the database."""
+    cam = Camera(
+        name=body.name,
+        stream_url=body.stream_url,
+        location=body.location,
+        is_active=body.is_active,
+        ingestion_fps=body.ingestion_fps,
+        detection_width=body.detection_width,
+        detection_height=body.detection_height,
+    )
+    db.add(cam)
+    db.commit()
+    db.refresh(cam)
+    return {"message": "Camera added", "id": cam.id}
 
 
 @router.put("/{cam_id}")
-def update_camera(cam_id: int, body: CameraUpdate):
-    """Update the URL and/or title of an existing camera in config.yaml."""
-    cfg = get_config()
-    feeds = cfg.get("camera_feeds", [])
-    titles = cfg.get("camera_titles", [])
-    if cam_id >= len(feeds):
+def update_camera(cam_id: int, body: CameraUpdate, db: Session = Depends(get_db)):
+    """Update any fields of an existing camera."""
+    cam = db.query(Camera).filter(Camera.id == cam_id).first()
+    if not cam:
         raise HTTPException(404, "Camera not found")
-    feeds[cam_id] = body.url
-    # Pad titles list if it is shorter than feeds
-    while len(titles) <= cam_id:
-        titles.append(f"Camera {len(titles)}")
-    titles[cam_id] = body.title or titles[cam_id]
-    cfg["camera_feeds"] = feeds
-    cfg["camera_titles"] = titles
-    save_config(cfg)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(cam, field, value)
+    db.commit()
     return {"message": "Camera updated"}
 
 
 @router.delete("/{cam_id}")
-def delete_camera(cam_id: int):
+def delete_camera(cam_id: int, db: Session = Depends(get_db)):
     """
-    Remove a camera from config.yaml.
-    If the camera thread is running, it is stopped first.
+    Delete a camera from the database.
+    Stops the live process first if it is running.
+    Related rows (assignments, buzzers, ROIs, alarm config) are CASCADE deleted.
+    Alerts and burglar events retain the row with camera_id SET NULL.
     """
-    cfg = get_config()
-    feeds = cfg.get("camera_feeds", [])
-    titles = cfg.get("camera_titles", [])
-    if cam_id >= len(feeds):
+    cam = db.query(Camera).filter(Camera.id == cam_id).first()
+    if not cam:
         raise HTTPException(404, "Camera not found")
-    # Stop the thread before removing so it doesn't hold a stale RTSP connection
     if camera_manager.is_running():
         try:
             camera_manager.stop_camera(cam_id)
         except Exception:
             pass
-    feeds.pop(cam_id)
-    if cam_id < len(titles):
-        titles.pop(cam_id)
-    cfg["camera_feeds"] = feeds
-    cfg["camera_titles"] = titles
-    save_config(cfg)
+    db.delete(cam)
+    db.commit()
     return {"message": "Camera deleted"}
 
 
 @router.post("/start")
 def start_all():
-    """
-    Load config, load the YOLO model (if not already loaded), and start
-    a detection thread for every configured camera.
-    """
+    """Load cameras and models from DB, then start all detection processes."""
     try:
         camera_manager.start_all()
         return {"message": "Detection started"}
@@ -114,14 +124,14 @@ def start_all():
 
 @router.post("/stop")
 def stop_all():
-    """Signal all camera threads to stop and wait for them to exit."""
+    """Signal all camera processes to stop and wait for them to exit."""
     camera_manager.stop_all()
     return {"message": "Detection stopped"}
 
 
 @router.post("/{cam_id}/start")
 def start_camera(cam_id: int):
-    """Start detection on a single camera by its config index."""
+    """Start detection on a single camera by its DB id."""
     try:
         camera_manager.start_camera(cam_id)
         return {"message": f"Camera {cam_id} started"}
@@ -133,6 +143,6 @@ def start_camera(cam_id: int):
 
 @router.post("/{cam_id}/stop")
 def stop_camera(cam_id: int):
-    """Stop the detection thread for a single camera."""
+    """Stop the detection process for a single camera."""
     camera_manager.stop_camera(cam_id)
     return {"message": f"Camera {cam_id} stopped"}
