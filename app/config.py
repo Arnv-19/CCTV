@@ -78,14 +78,14 @@ def get_config() -> dict:
     cfg.setdefault("alarm_http_token", "")   # optional ?token= query param
 
     # --- MQTT transport options ---
-    cfg.setdefault("mqtt_broker", "")
-    cfg.setdefault("mqtt_port", 1883)
-    cfg.setdefault("mqtt_username", "")
-    cfg.setdefault("mqtt_password", "")
-    cfg.setdefault("mqtt_topic", "skycctv/alarm")
-    cfg.setdefault("mqtt_client_id", "skycctv-ai")
-    cfg.setdefault("mqtt_qos", 1)
-    cfg.setdefault("mqtt_retain", False)
+    # cfg.setdefault("mqtt_broker", "")
+    # cfg.setdefault("mqtt_port", 1883)
+    # cfg.setdefault("mqtt_username", "")
+    # cfg.setdefault("mqtt_password", "")
+    # cfg.setdefault("mqtt_topic", "skycctv/alarm")
+    # cfg.setdefault("mqtt_client_id", "skycctv-ai")
+    # cfg.setdefault("mqtt_qos", 1)
+    # cfg.setdefault("mqtt_retain", False)
 
     # --- FPS and batch inference ---
     cfg.setdefault("ingestion_fps", 4)

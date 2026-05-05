@@ -14,20 +14,10 @@ from app.db.database import get_db
 from app.db.models import User
 from app.services.auth_service import verify_password, create_access_token
 from app.dependencies import get_current_user
-
+from app.schemas.user_schema import LoginRequest, TokenResponse
 router = APIRouter()
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    role: str
-    username: str
 
 
 @router.post("/login", response_model=TokenResponse)

@@ -19,27 +19,10 @@ from app.db.database import get_db
 from app.db.models import CameraModel, User
 from app.dependencies import get_current_user, require_admin
 from app.services.camera_manager import camera_manager
-
+from app.schemas.camera_model_schemas import ModelToggle, ModelPatch, _row_dict
 router = APIRouter()
 
 
-class ModelToggle(BaseModel):
-    model_name: str
-    is_enabled: bool = True
-
-
-class ModelPatch(BaseModel):
-    is_enabled: bool | None = None
-
-
-def _row_dict(r: CameraModel) -> dict:
-    return {
-        "id":         r.id,
-        "camera_id":  r.camera_id,
-        "model_name": r.model_name,
-        "is_enabled": r.is_enabled,
-        "updated_at": r.updated_at,
-    }
 
 
 @router.get("/{camera_id}")
