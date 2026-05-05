@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config.example.yaml  —  reference template (tracked in git)
+#
+# config.yaml is git-ignored so each machine has its own copy.
+# Copy this file to config.yaml and fill in the values for your environment.
+#
+#   cp config.example.yaml config.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── LOCAL DEV (Mac, webcam) ───────────────────────────────────────────────────
+# camera_feeds:
+# - 0
+#
+# camera_titles:
+# - Camera 1
+#
+# model_path: weights/best 1.pt
+# ppe_model_path: weights/best 1.pt
+# gloves_model_path: weights/helmet_model.pt
+# person_model_path: weights/person_model.pt
+
+# ── PRODUCTION (Linux server, RTSP cameras) ───────────────────────────────────
+camera_feeds:
+- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=26&subtype=0
+- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=28&subtype=0
+- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=29&subtype=0
+- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=27&subtype=0
+
+camera_titles:
+- Camera 1
+- Camera 2
+- Camera 3
+- Camera 4
+
+model_path: weights/best (3).pt
+ppe_model_path: weights/best (3).pt
+gloves_model_path: weights/best (3).pt
+person_model_path: weights/best (3).pt
+
+# ── SHARED SETTINGS (same on all machines) ───────────────────────────────────
+alarm_cooldown_sec: 30
+snapshot_cooldown_sec: 120
+alarm_http_token: ''
+alarm_transport: usb
+burglar_test_sound: false
+class_file: data/class_names.yaml
+confidence_threshold: 0.25
+esp_ip: ''
+
+detection_frame_width: 640
+detection_frame_height: 480
+yolo_imgsz: 640
+
+ingestion_fps: 4
+inference_fps: 4
+inference_batch_size: 8
+
+mqtt_broker: ''
+mqtt_client_id: skycctv-ai
+mqtt_password: ''
+mqtt_port: 1883
+mqtt_qos: 1
+mqtt_retain: false
+mqtt_topic: skycctv/alarm
+mqtt_username: ''
+
+use_wifi: false

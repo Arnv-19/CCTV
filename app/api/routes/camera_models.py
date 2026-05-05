@@ -98,7 +98,8 @@ def upsert_camera_model(
 
     # Apply model changes immediately for active camera workers.
     try:
-        if camera_id in camera_manager.threads and camera_manager.threads[camera_id].is_alive():
+        proc = camera_manager.processes.get(camera_id)
+        if proc is not None and proc.is_alive():
             camera_manager.start_camera(camera_id)
     except Exception as e:
         print(f"[CameraModels] Warning: could not restart camera {camera_id}: {e}")
@@ -137,7 +138,8 @@ def toggle_model(
 
     # Apply model changes immediately for active camera workers.
     try:
-        if camera_id in camera_manager.threads and camera_manager.threads[camera_id].is_alive():
+        proc = camera_manager.processes.get(camera_id)
+        if proc is not None and proc.is_alive():
             camera_manager.start_camera(camera_id)
     except Exception as e:
         print(f"[CameraModels] Warning: could not restart camera {camera_id}: {e}")

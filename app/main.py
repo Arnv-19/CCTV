@@ -8,6 +8,14 @@ Startup: initialises the DB (tables + admin seed), loads YOLO model,
 Shutdown: stops camera threads, closes serial.
 """
 
+# Must be set before any multiprocessing objects (including mp.Manager) are
+# created. 'spawn' is required on Linux+CUDA (fork is not GPU-safe) and is
+# already the default on macOS — setting it explicitly makes both platforms
+# behave identically.
+import multiprocessing as _mp
+if _mp.get_start_method(allow_none=True) is None:
+    _mp.set_start_method("spawn")
+
 import os
 import time
 from contextlib import asynccontextmanager
