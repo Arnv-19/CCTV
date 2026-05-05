@@ -1,23 +1,29 @@
 #!/bin/bash
-# Run the Axis CCTV FastAPI server from the project root
-cd "$(dirname "$0")"
 
-# Load environment variables
-[ -f .env ] && export $(grep -v '^#' .env | xargs)
+# Resolve project root from the script's own location — works on any machine.
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_DIR" || exit 1
+
+# Safe env loading
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+fi
 
 PORT=${PORT:-8000}
 WORKERS=${WORKERS:-1}
 
-# Force project Python when available so imports match installed deps.
-PYTHON_BIN="python3"
-if [ -x ".venv/bin/python" ]; then
-  PYTHON_BIN=".venv/bin/python"
+# Prefer the venv Python when present (important for systemd on production).
+# Falls back to system python3 for local dev without a venv.
+if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
+  PYTHON_BIN="$PROJECT_DIR/.venv/bin/python"
+else
+  PYTHON_BIN="python3"
 fi
 
 if [ "${APP_ENV:-production}" = "development" ]; then
-  # Dev: single worker with hot-reload
   "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --reload
 else
-  # Production: no reload, configurable workers
   "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS"
 fi

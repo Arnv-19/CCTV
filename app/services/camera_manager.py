@@ -25,6 +25,7 @@ The singleton instance `camera_manager` is imported directly by route modules.
 """
 
 import threading
+import multiprocessing as mp
 import sys
 import os
 import time
@@ -40,7 +41,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from app.config import get_config
 from detector import load_model, load_class_names
 from alarm import init_serial, close_serial
-from camera_worker import camera_loop
+from camera_worker import camera_loop, ingestion_worker, result_handler_worker
+from inference_server import inference_server_loop
 from app.services.burglar_alarm_service import fetch_burglar_config
 
 # Sentinel value pushed to alert_queue to signal AlertWriter to stop
@@ -244,16 +246,20 @@ def _alert_writer_loop(queue: Queue):
 
 class CameraManager:
     def __init__(self):
+        # Manager server: owns frame_dict, stats_dict and the cross-process lock.
+        # Must be created before any mp.Process is spawned so proxy objects are
+        # picklable and sharable between the main process and camera processes.
+        self._mp_manager = mp.Manager()
         # Latest JPEG frame bytes per camera: {cam_id: bytes}
-        self.frame_dict: dict[int, bytes] = {}
+        self.frame_dict = self._mp_manager.dict()
         # Live stats per camera: {cam_id: {status, fps, violations, frames}}
-        self.stats_dict: dict[int, dict] = {}
-        # Shared lock protecting both frame_dict and stats_dict
-        self.lock = threading.Lock()
-        # Active camera threads: {cam_id: Thread}
-        self.threads: dict[int, threading.Thread] = {}
-        # Per-camera stop signals: {cam_id: Event}
-        self.stop_events: dict[int, threading.Event] = {}
+        self.stats_dict = self._mp_manager.dict()
+        # Cross-process lock protecting atomic read-modify-write on stats_dict
+        self.lock = self._mp_manager.Lock()
+        # Active camera processes: {cam_id: Process}
+        self.processes: dict[int, mp.Process] = {}
+        # Per-camera stop signals (mp.Event — picklable, works cross-process)
+        self.stop_events = {}  # type: ignore
         # Shared YOLO model (loaded once, reused across all camera threads)
         self.model = None
         self.model_path_loaded: str | None = None
@@ -276,9 +282,23 @@ class CameraManager:
         # True once start_all() has been called
         self._running = False
 
-        # Queue shared by all camera threads → AlertWriter
-        self.alert_queue: Queue = Queue()
-        # AlertWriter background thread
+        # ── Shared-inference architecture ─────────────────────────────────
+        # frame_queue: ingestion workers → inference server
+        self.frame_queue: mp.Queue = None
+        # result_queues: inference server → per-camera result handler threads.
+        # Manager dict so the inference server process sees cameras added after startup
+        # without a restart (hot camera add / dynamic camera routing).
+        self.result_queues = self._mp_manager.dict()  # {cam_id: mp.Queue}
+        # Shared inference server process (1 per CameraManager)
+        self._inference_server: mp.Process = None
+        self._inference_stop_event = None  # mp.Event, set when stopping inference server
+        # Per-camera result handler threads (running in main process)
+        self._result_handler_threads: dict = {}   # {cam_id: threading.Thread}
+        self._result_handler_stop_events: dict = {}   # {cam_id: threading.Event}
+
+        # Queue shared by all camera processes → AlertWriter (mp.Queue is picklable)
+        self.alert_queue: mp.Queue = mp.Queue()
+        # AlertWriter background thread (stays a thread — it is I/O-bound, not CPU-bound)
         self._alert_writer_thread: threading.Thread | None = None
         self._process = psutil.Process(os.getpid())
         self._process_cpu_sample = {
@@ -318,9 +338,14 @@ class CameraManager:
             print(f"[CameraManager] Warning: could not preload model: {e}")
 
     def shutdown(self):
-        """Stop all cameras and close serial on app shutdown."""
+        """Stop all cameras, close serial, and clean up the multiprocessing manager."""
         self.stop_all()
         close_serial()
+        try:
+            self.alert_queue.close()
+            self._mp_manager.shutdown()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Start / stop
@@ -336,12 +361,12 @@ class CameraManager:
         """
         if self._running:
             # If threads are still alive, genuinely running — skip.
-            if any(t.is_alive() for t in self.threads.values()):
+            if any(p.is_alive() for p in self.processes.values()):
                 return
-            # All threads died without an explicit stop() (e.g. webcam error).
+            # All processes died without an explicit stop() (e.g. webcam error).
             # Clean up orphaned state so we can restart cleanly.
-            print("[CameraManager] Threads died without explicit stop — resetting state for restart.")
-            self.threads.clear()
+            print("[CameraManager] Camera processes died without explicit stop — resetting state for restart.")
+            self.processes.clear()
             self.stop_events.clear()
             with self.lock:
                 self.frame_dict.clear()
@@ -447,7 +472,58 @@ class CameraManager:
         detection_height  = cfg.get("detection_frame_height", 480)
         yolo_imgsz        = cfg.get("yolo_imgsz", 640)
         burglar_test_sound = cfg.get("burglar_test_sound", False)
+        ingestion_fps     = cfg.get("ingestion_fps", 4)
+        inference_fps     = cfg.get("inference_fps", 4)
+        batch_size        = cfg.get("inference_batch_size", 8)
 
+        # ── Start shared inference server ──────────────────────────────────
+        # Resolve model paths to absolute so the child process can find them
+        # regardless of working directory.
+        _abs = lambda p: str(_resolve_local_path(p)) if p and not Path(p).is_absolute() else p
+        _gloves_path   = _abs(self.gloves_model_path_loaded)
+        _burglar_path  = _abs(self.person_model_path_loaded)
+        _main_path     = _abs(self.model_path_loaded) if self.model_path_loaded else None
+
+        if _main_path:
+            # Create shared frame queue (maxsize limits memory under load)
+            num_cameras = max(1, len([u for u in feeds if u is not None]))
+            self.frame_queue = mp.Queue(maxsize=batch_size * num_cameras * 2)
+
+            # Pre-create per-camera result queues.
+            # Must be Manager().Queue() — regular mp.Queue can't be stored in a
+            # Manager dict on macOS (spawn start method hits assert_spawning).
+            for i, url in enumerate(feeds):
+                if url is not None:
+                    self.result_queues[i] = self._mp_manager.Queue(maxsize=4)
+            # Also ensure webcam-fallback cam (id=0) has a result queue
+            if 0 not in self.result_queues:
+                self.result_queues[0] = self._mp_manager.Queue(maxsize=4)
+
+            self._inference_stop_event = mp.Event()
+            self._inference_server = mp.Process(
+                target=inference_server_loop,
+                kwargs=dict(
+                    model_path=_main_path,
+                    gloves_model_path=_gloves_path,
+                    burglar_person_model_path=_burglar_path,
+                    frame_queue=self.frame_queue,
+                    result_queues=self.result_queues,
+                    stop_event=self._inference_stop_event,
+                    batch_size=batch_size,
+                    batch_timeout=max(0.02, 1.0 / max(1, float(inference_fps))),
+                    threshold=threshold,
+                    yolo_imgsz=yolo_imgsz,
+                ),
+                daemon=True,
+                name="InferenceServer",
+            )
+            self._inference_server.start()
+            print(
+                f"[CameraManager] InferenceServer started (PID={self._inference_server.pid}, "
+                f"batch_size={batch_size})"
+            )
+        else:
+            print("[CameraManager] Warning: no model path — inference server not started")
 
         started_any = False
         for cam_id, url in enumerate(feeds):
@@ -475,13 +551,13 @@ class CameraManager:
                 mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
                 violation_classes=self.violation_classes,
                 safe_classes=self.safe_classes,
-                gloves_model=self.gloves_model,
-                person_model=self.person_model,
                 snapshot_cooldown=snapshot_cooldown,
                 detection_width=detection_width,
                 detection_height=detection_height,
                 yolo_imgsz=yolo_imgsz,
                 burglar_test_sound=burglar_test_sound,
+                ingestion_fps=ingestion_fps,
+                inference_fps=inference_fps,
             )
             started_any = True
 
@@ -496,13 +572,13 @@ class CameraManager:
                 mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
                 violation_classes=self.violation_classes,
                 safe_classes=self.safe_classes,
-                gloves_model=self.gloves_model,
-                person_model=self.person_model,
                 snapshot_cooldown=snapshot_cooldown,
                 detection_width=detection_width,
                 detection_height=detection_height,
                 yolo_imgsz=yolo_imgsz,
                 burglar_test_sound=burglar_test_sound,
+                ingestion_fps=ingestion_fps,
+                inference_fps=inference_fps,
             )
         else:
             self.runtime_fallbacks["source_fallback"] = False
@@ -510,16 +586,49 @@ class CameraManager:
         self._running = True
 
     def stop_all(self):
-        """Signal all camera threads to stop, then stop the AlertWriter."""
+        """Signal all camera processes and threads to stop, then stop inference server."""
+        # 1. Stop ingestion processes
         for event in self.stop_events.values():
             event.set()
-        for t in self.threads.values():
-            t.join(timeout=2)
-        self.threads.clear()
+        for proc in self.processes.values():
+            proc.join(timeout=3)
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=2)
+                if proc.is_alive():
+                    proc.kill()
+        self.processes.clear()
         self.stop_events.clear()
-        with self.lock:
-            self.frame_dict.clear()
-            self.stats_dict.clear()
+
+        # 2. Stop result handler threads
+        for event in self._result_handler_stop_events.values():
+            event.set()
+        for t in self._result_handler_threads.values():
+            t.join(timeout=2)
+        self._result_handler_threads.clear()
+        self._result_handler_stop_events.clear()
+
+        # 3. Stop shared inference server
+        if self._inference_server is not None and self._inference_server.is_alive():
+            if self._inference_stop_event is not None:
+                self._inference_stop_event.set()
+            # Send stop sentinel to unblock frame_queue.get()
+            if self.frame_queue is not None:
+                try:
+                    self.frame_queue.put_nowait(None)
+                except Exception:
+                    pass
+            self._inference_server.join(timeout=5)
+            if self._inference_server.is_alive():
+                self._inference_server.terminate()
+                self._inference_server.join(timeout=2)
+        self._inference_server = None
+        self._inference_stop_event = None
+        self.frame_queue = None
+        self.result_queues.clear()
+
+        self.frame_dict.clear()
+        self.stats_dict.clear()
         self._thread_cpu_samples.clear()
         self._running = False
         self._stop_alert_writer()
@@ -539,6 +648,10 @@ class CameraManager:
         # Make sure alert writer is alive
         self._start_alert_writer()
 
+        # Ensure result queue exists for this camera
+        if cam_id not in self.result_queues:
+            self.result_queues[cam_id] = self._mp_manager.Queue(maxsize=4)
+
         self._start_camera(
             cam_id, url,
             cfg.get("confidence_threshold", 0.25),
@@ -557,24 +670,40 @@ class CameraManager:
             cfg.get("mqtt_retain", False),
             violation_classes=self.violation_classes,
             safe_classes=self.safe_classes,
-            gloves_model=self.gloves_model,
-            enabled_models=_fetch_enabled_models_for_camera(cam_id),
             snapshot_cooldown=cfg.get("snapshot_cooldown_sec", 120),
             detection_width=cfg.get("detection_frame_width", 640),
             detection_height=cfg.get("detection_frame_height", 480),
             yolo_imgsz=cfg.get("yolo_imgsz", 640),
-             
-
+            ingestion_fps=cfg.get("ingestion_fps", 4),
+            inference_fps=cfg.get("inference_fps", 4),
         )
 
     def stop_camera(self, cam_id: int):
-        """Signal a single camera thread to stop and wait for it to exit."""
+        """Signal a single camera's ingestion process and result handler to stop."""
+        # Stop ingestion process
         if cam_id in self.stop_events:
             self.stop_events[cam_id].set()
-            self.threads[cam_id].join(timeout=2)
+            proc = self.processes.get(cam_id)
+            if proc is not None:
+                proc.join(timeout=3)
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join(timeout=2)
+                    if proc.is_alive():
+                        proc.kill()
             del self.stop_events[cam_id]
-            del self.threads[cam_id]
+            self.processes.pop(cam_id, None)
+
+        # Stop result handler thread
+        rh_event = self._result_handler_stop_events.pop(cam_id, None)
+        if rh_event is not None:
+            rh_event.set()
+        rh_thread = self._result_handler_threads.pop(cam_id, None)
+        if rh_thread is not None:
+            rh_thread.join(timeout=2)
+
         self._thread_cpu_samples.pop(cam_id, None)
+
 
     def _start_alert_writer(self):
         """Start the AlertWriter background thread if it is not already running."""
@@ -608,50 +737,94 @@ class CameraManager:
         alarm_transport, alarm_http_token,
         mqtt_broker, mqtt_port, mqtt_username, mqtt_password,
         mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
-        # violation_classes=None, safe_classes=None, gloves_model=None,
-        violation_classes=None, safe_classes=None, gloves_model=None, person_model=None,
+        violation_classes=None, safe_classes=None,
         snapshot_cooldown=120,
-        detection_width=960,
-        detection_height=720,
-        yolo_imgsz=960,
+        detection_width=640,
+        detection_height=480,
+        yolo_imgsz=640,
         burglar_test_sound=False,
+        ingestion_fps=4,
+        inference_fps=4,
     ):
         """
-        Internal: create and start a camera thread.
-        If a thread for this cam_id is already running, it is stopped first.
+        Internal: start per-camera ingestion process + result handler thread.
 
-        Fetches the camera's assigned buzzers from the DB so the worker thread
-        has the full buzzer config without needing DB access during inference.
-        MQTT and alarm params are passed as kwargs to avoid positional fragility.
+        Shared-inference architecture:
+          - ingestion_worker (mp.Process): FFmpeg/webcam → shared frame_queue
+          - result_handler_worker (threading.Thread): result_queue → alarm/MJPEG
+          - inference_server_loop (mp.Process, shared): frame_queue → result_queues
         """
-        # Stop any existing thread for this camera slot before replacing it
+        # ── Stop existing ingestion process for this slot ─────────────────
         if cam_id in self.stop_events:
             self.stop_events[cam_id].set()
-            old_thread = self.threads.get(cam_id)
-            if old_thread is not None and old_thread.is_alive():
-                old_thread.join(timeout=2)
-            
-        # Fetch DB-assigned buzzers and enabled model flags for this camera
-        assigned_buzzers = _fetch_buzzers_for_camera(cam_id)
-        enabled_models   = _fetch_enabled_models_for_camera(cam_id)
-        burglar_alarm_cfg   = fetch_burglar_config(cam_id)
+            old_proc = self.processes.get(cam_id)
+            if old_proc is not None and old_proc.is_alive():
+                old_proc.join(timeout=2)
+                if old_proc.is_alive():
+                    old_proc.terminate()
+                    old_proc.join(timeout=1)
 
+        # ── Stop existing result handler thread for this slot ─────────────
+        old_rh_event = self._result_handler_stop_events.pop(cam_id, None)
+        if old_rh_event is not None:
+            old_rh_event.set()
+        old_rh_thread = self._result_handler_threads.pop(cam_id, None)
+        if old_rh_thread is not None:
+            old_rh_thread.join(timeout=2)
 
-        stop_event = threading.Event()
-        self.stop_events[cam_id] = stop_event
+        # ── Fetch per-camera DB config (main process, picklable dicts) ────
+        assigned_buzzers  = _fetch_buzzers_for_camera(cam_id)
+        enabled_models    = _fetch_enabled_models_for_camera(cam_id)
+        burglar_alarm_cfg = fetch_burglar_config(cam_id)
 
-        t = threading.Thread(
-            target=camera_loop,
-            # Positional args match the required signature of camera_loop
+        # ── Ensure result queue exists ────────────────────────────────────
+        if cam_id not in self.result_queues:
+            self.result_queues[cam_id] = self._mp_manager.Queue(maxsize=4)
+
+        # ── Ingestion process ─────────────────────────────────────────────
+        ing_stop = mp.Event()
+        self.stop_events[cam_id] = ing_stop
+
+        if self.frame_queue is None:
+            # Fallback: inference server not started (no model); create a queue
+            # so the ingestion process doesn't crash — frames will be dropped.
+            self.frame_queue = mp.Queue(maxsize=16)
+
+        proc = mp.Process(
+            target=ingestion_worker,
             args=(
-                cam_id, url, self.model, threshold,
-                self.helmet_class, self.no_helmet_class,
-                cooldown, use_wifi, esp_ip,
-                self.frame_dict, self.lock,
+                cam_id, url, self.frame_queue, ing_stop,
+                self.stats_dict, self.lock,
             ),
-            # Keyword args for optional params — safer against signature changes
             kwargs=dict(
-                stop_event=stop_event,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                ingestion_fps=ingestion_fps,
+            ),
+            daemon=True,
+            name=f"Ingestion-{cam_id}",
+        )
+        self.processes[cam_id] = proc
+        proc.start()
+
+        # ── Result handler thread (runs in main process) ──────────────────
+        rh_stop = threading.Event()
+        self._result_handler_stop_events[cam_id] = rh_stop
+
+        rh_thread = threading.Thread(
+            target=result_handler_worker,
+            kwargs=dict(
+                cam_id=cam_id,
+                result_queue=self.result_queues[cam_id],
+                frame_dict=self.frame_dict,
+                lock=self.lock,
+                threshold=threshold,
+                helmet_class=self.helmet_class or "",
+                no_helmet_class=self.no_helmet_class or "",
+                cooldown=cooldown,
+                use_wifi=use_wifi,
+                esp_ip=esp_ip,
+                stop_event=rh_stop,
                 stats_dict=self.stats_dict,
                 alarm_transport=alarm_transport,
                 alarm_http_token=alarm_http_token,
@@ -663,7 +836,6 @@ class CameraManager:
                 mqtt_client_id=mqtt_client_id,
                 mqtt_qos=mqtt_qos,
                 mqtt_retain=mqtt_retain,
-                # DB-backed features
                 assigned_buzzers=assigned_buzzers,
                 alert_queue=self.alert_queue,
                 snapshot_cooldown=snapshot_cooldown,
@@ -673,19 +845,21 @@ class CameraManager:
                 enabled_models=enabled_models,
                 violation_classes=violation_classes or self.violation_classes,
                 safe_classes=safe_classes or self.safe_classes,
-                gloves_model=gloves_model if gloves_model is not None else self.gloves_model,
-                burglar_person_model=person_model if person_model is not None else self.person_model,
                 burglar_alarm_config=burglar_alarm_cfg,
                 burglar_test_sound=bool(burglar_test_sound),
             ),
-            daemon=True,   # thread exits automatically when the main process does
+            daemon=True,
+            name=f"ResultHandler-{cam_id}",
         )
-        self.threads[cam_id] = t
-        t.start()
+        self._result_handler_threads[cam_id] = rh_thread
+        rh_thread.start()
+
         print(
-            f"[CameraManager] Camera {cam_id} started "
-            f"({len(assigned_buzzers)} buzzer(s) assigned)."
+            f"[CameraManager] Camera {cam_id} started — "
+            f"ingestion PID={proc.pid}, result handler TID={rh_thread.native_id} "
+            f"({len(assigned_buzzers)} buzzer(s))."
         )
+
 
     # ------------------------------------------------------------------
     # Data accessors (called by route handlers)
@@ -693,8 +867,9 @@ class CameraManager:
 
     def get_latest_frame(self, cam_id: int) -> bytes | None:
         """Return the most recent JPEG bytes for a camera, or None."""
-        with self.lock:
-            return self.frame_dict.get(cam_id)
+        # Manager dict serialises all operations internally; no explicit lock needed
+        # for a simple read — saves 2 IPC round-trips per MJPEG frame.
+        return self.frame_dict.get(cam_id)
 
     def get_stats(self) -> dict:
         """Return a copy of the stats dict (safe to serialize as JSON)."""
@@ -735,10 +910,6 @@ class CameraManager:
         )
 
         process_memory = self._process.memory_info()
-        thread_cpu_times = {
-            thread.id: thread.user_time + thread.system_time
-            for thread in self._process.threads()
-        }
 
         cfg = get_config()
         feeds = cfg.get("camera_feeds", [])
@@ -752,26 +923,32 @@ class CameraManager:
         for cam_id, url in enumerate(feeds):
             title = titles[cam_id] if cam_id < len(titles) else f"Camera {cam_id}"
             stats = stats_snapshot.get(cam_id, {})
-            thread_native_id = stats.get("thread_native_id")
-            thread_cpu_time = thread_cpu_times.get(thread_native_id) if thread_native_id is not None else None
 
+            # Per-process CPU: measure wall-clock CPU time delta between polls
             cpu_percent_single_core = 0.0
-            if thread_native_id is not None and thread_cpu_time is not None:
-                previous = self._thread_cpu_samples.get(cam_id)
-                if previous and previous.get("thread_native_id") == thread_native_id:
-                    thread_elapsed = max(now - previous["sample_at"], 1e-6)
-                    cpu_percent_single_core = max(
-                        0.0,
-                        (thread_cpu_time - previous["cpu_time"]) / thread_elapsed * 100.0,
-                    )
-                self._thread_cpu_samples[cam_id] = {
-                    "thread_native_id": thread_native_id,
-                    "cpu_time": thread_cpu_time,
-                    "sample_at": now,
-                }
+            proc = self.processes.get(cam_id)
+            if proc is not None and proc.is_alive() and proc.pid:
+                try:
+                    p = psutil.Process(proc.pid)
+                    proc_cpu_time = sum(p.cpu_times()[:2])
+                    previous = self._thread_cpu_samples.get(cam_id)
+                    if previous and previous.get("pid") == proc.pid:
+                        elapsed_c = max(now - previous["sample_at"], 1e-6)
+                        cpu_percent_single_core = max(
+                            0.0,
+                            (proc_cpu_time - previous["cpu_time"]) / elapsed_c * 100.0,
+                        )
+                    self._thread_cpu_samples[cam_id] = {
+                        "pid": proc.pid,
+                        "cpu_time": proc_cpu_time,
+                        "sample_at": now,
+                    }
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    self._thread_cpu_samples.pop(cam_id, None)
             else:
                 self._thread_cpu_samples.pop(cam_id, None)
-
+                # Removed broken thread_native_id/thread_cpu_time logic for dead processes
+                pass
             frame_buffer_bytes = int(stats.get("frame_buffer_bytes", frame_sizes.get(cam_id, 0)) or 0)
             cpu_percent_single_core = round(min(cpu_percent_single_core, 100.0), 1)
             cpu_percent_total = round(min(100.0, cpu_percent_single_core / logical_cores), 2)
@@ -781,9 +958,9 @@ class CameraManager:
                 "title": title,
                 "url": url,
                 "status": stats.get("status", "stopped"),
-                "active": cam_id in self.threads and self.threads[cam_id].is_alive(),
+                "active": proc is not None and proc.is_alive(),
                 "fps": stats.get("fps", 0),
-                "thread_native_id": thread_native_id,
+                "process_pid": proc.pid if proc is not None and proc.is_alive() else None,
                 "thread_cpu_percent_single_core": cpu_percent_single_core,
                 "thread_cpu_percent_total_machine": cpu_percent_total,
                 "frame_buffer_bytes": frame_buffer_bytes,
@@ -832,7 +1009,8 @@ class CameraManager:
         result = []
         for i, url in enumerate(feeds):
             title = titles[i] if i < len(titles) else f"Camera {i}"
-            is_alive = i in self.threads and self.threads[i].is_alive()
+            proc = self.processes.get(i)
+            is_alive = proc is not None and proc.is_alive()
             stats = self.stats_dict.get(i, {})
             result.append({
                 "id": i,

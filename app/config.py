@@ -87,4 +87,10 @@ def get_config() -> dict:
     cfg.setdefault("mqtt_qos", 1)
     cfg.setdefault("mqtt_retain", False)
 
+    # --- FPS and batch inference ---
+    cfg.setdefault("ingestion_fps", 4)
+    cfg.setdefault("inference_fps", 4)
+    # Frames batched per GPU forward pass — higher = better GPU utilisation
+    cfg.setdefault("inference_batch_size", 8)
+
     return cfg
