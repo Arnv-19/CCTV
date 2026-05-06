@@ -1,8 +1,8 @@
 
 
-from click import DateTime
+from datetime import datetime
+
 from sqlalchemy import Column, DateTime, Integer, String, Boolean, ForeignKey
-from polars import datetime
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base

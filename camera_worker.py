@@ -1426,7 +1426,9 @@ def result_handler_worker(
         if item is None:   # stop sentinel
             break
 
-        _cam_id_in, frame_payload, ts, detections, gloves_dets, burglar_dets = item
+        # Unpack — extra_dets is a dict {model_name: [detections] | None}
+        # None means "same as main" (inference server reused main model for that key)
+        _cam_id_in, frame_payload, ts, detections, extra_dets = item
 
         # Decode JPEG bytes sent by inference server (reduces IPC data 18x).
         if isinstance(frame_payload, (bytes, bytearray)) and frame_payload:
@@ -1438,8 +1440,15 @@ def result_handler_worker(
             resized = frame_payload  # raw numpy fallback (legacy path)
 
         # Resolve None sentinels (same-model shortcut from inference server)
+        gloves_dets = extra_dets.get("gloves")
+        burglar_dets = extra_dets.get("burglar")
         gloves_detections = detections if gloves_dets is None else gloves_dets
         burglar_candidates_raw = detections if burglar_dets is None else burglar_dets
+        # Resolve any remaining None sentinels in extra_dets
+        extra_dets = {
+            k: (detections if v is None else v)
+            for k, v in extra_dets.items()
+        }
 
         frame_count += 1
         start = time.time()

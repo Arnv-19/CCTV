@@ -61,11 +61,9 @@ def _parse_result(result) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def inference_server_loop(
-    model_path: str,
-    gloves_model_path,            # str | None
-    burglar_person_model_path,    # str | None
-    frame_queue: mp.Queue,        # In:  (cam_id, frame_bgr_ndarray, ts_float)
-    result_queues,                # Out: Manager dict {cam_id: mp.Queue} — supports hot camera add
+    models: dict,             # {"main": path, "gloves": path, "burglar": path, "vehicle": path, ...}
+    frame_queue: mp.Queue,    # In:  (cam_id, frame_bgr_ndarray, ts_float)
+    result_queues,            # Out: Manager dict {cam_id: mp.Queue} — supports hot camera add
     stop_event: mp.Event,
     batch_size: int = 8,
     batch_timeout: float = 0.05,  # seconds to wait for a full batch
@@ -75,51 +73,51 @@ def inference_server_loop(
     """
     Run as a single shared inference process.
 
-    Reads frames from frame_queue, batches up to batch_size frames (or waits
-    batch_timeout seconds), runs YOLO batch predict for ALL models, then routes
-    each result back to the camera's dedicated result_queue as a tuple:
+    `models` dict keys:
+        "main"    — required. primary detection model (PPE, helmet, etc.)
+        "gloves"  — optional. gloves/bare-hand model
+        "burglar" — optional. person/intruder model for burglar alarm
+        any other key (e.g. "vehicle", "fire") — loaded and run as an extra model
 
-        (cam_id, frame_bgr, ts, detections, gloves_dets, burglar_dets)
+    Adding a new model in the future = one new key in the dict. No code changes needed.
 
-    gloves_dets = None  →  caller should treat it as equal to detections
-                            (happens when gloves_model_path == model_path)
+    Result tuple written to each camera's result_queue:
+        (cam_id, frame_jpeg, ts, main_dets, extra_dets)
+
+        main_dets  — list of detection dicts from the "main" model
+        extra_dets — {model_name: [detections] | None}
+                     None means "same as main" (path was identical — no extra GPU call)
     """
-    print(f"[InferenceServer] Loading model: {model_path}")
-    model = load_model(model_path)
+    main_path = models.get("main")
+    if not main_path:
+        raise ValueError("[InferenceServer] 'main' key is required in models dict")
 
-    # ── Gloves model (reuse main model when paths match) ──────────────────
-    _gloves_same_as_main = False
-    if gloves_model_path and gloves_model_path != model_path:
-        try:
-            gloves_model = load_model(gloves_model_path)
-            print(f"[InferenceServer] Gloves model loaded: {gloves_model_path}")
-        except Exception as e:
-            print(f"[InferenceServer] Gloves model unavailable ({e}); using main model")
-            gloves_model = model
-            _gloves_same_as_main = True
-    elif gloves_model_path:   # same path as model_path
-        gloves_model = model
-        _gloves_same_as_main = True
-    else:
-        gloves_model = None
+    print(f"[InferenceServer] Loading main model: {main_path}")
+    main_model = load_model(main_path)
 
-    # ── Burglar / person model ────────────────────────────────────────────
-    _burglar_same_as_main = False
-    if burglar_person_model_path and burglar_person_model_path != model_path:
-        try:
-            burglar_model = load_model(burglar_person_model_path)
-            print(f"[InferenceServer] Burglar model loaded: {burglar_person_model_path}")
-        except Exception as e:
-            print(f"[InferenceServer] Burglar model unavailable ({e}); using main model")
-            burglar_model = model
-            _burglar_same_as_main = True
-    else:
-        burglar_model = model   # fallback to main
-        _burglar_same_as_main = True
+    # ── Load all secondary models ─────────────────────────────────────────
+    # _secondary: {name: (model_obj, same_as_main)}
+    # same_as_main=True → skip separate GPU call; caller reuses main results downstream
+    _secondary: dict = {}
+    for name, path in models.items():
+        if name == "main" or not path:
+            continue
+        if path == main_path:
+            _secondary[name] = (main_model, True)
+            print(f"[InferenceServer] Model '{name}' reuses main model (same path).")
+        else:
+            try:
+                m = load_model(path)
+                _secondary[name] = (m, False)
+                print(f"[InferenceServer] Model '{name}' loaded: {path}")
+            except Exception as e:
+                print(f"[InferenceServer] Model '{name}' unavailable ({e}); falling back to main model.")
+                _secondary[name] = (main_model, True)
 
     print(
         f"[InferenceServer] Ready — "
-        f"batch_size={batch_size}, timeout={batch_timeout}s, imgsz={yolo_imgsz}"
+        f"batch_size={batch_size}, timeout={batch_timeout}s, imgsz={yolo_imgsz}, "
+        f"models={list(models.keys())}"
     )
 
     # Local queue cache: avoid an IPC round-trip to the Manager on every frame.
@@ -164,7 +162,7 @@ def inference_server_loop(
 
         # ── Batch YOLO inference — main model ─────────────────────────────
         try:
-            main_results = model.predict(
+            main_results = main_model.predict(
                 source=frames,
                 conf=threshold,
                 imgsz=yolo_imgsz,
@@ -172,57 +170,42 @@ def inference_server_loop(
                 verbose=False,
             )
         except Exception as e:
-            print(f"[InferenceServer] Batch inference error: {e}")
+            print(f"[InferenceServer] Main batch inference error: {e}")
             main_results = [None] * len(batch)
 
-        # ── Batch YOLO inference — gloves model ───────────────────────────
-        # Run the full batch in one GPU call instead of one-frame-at-a-time.
-        if _gloves_same_as_main or gloves_model is None:
-            gloves_results = None   # sentinel: reuse main detections downstream
-        else:
-            try:
-                gloves_results = gloves_model.predict(
-                    source=frames,
-                    conf=threshold,
-                    imgsz=yolo_imgsz,
-                    stream=False,
-                    verbose=False,
-                )
-            except Exception as e:
-                print(f"[InferenceServer] Gloves batch error: {e}")
-                gloves_results = [None] * len(batch)
-
-        # ── Batch YOLO inference — burglar / person model ─────────────────
-        if _burglar_same_as_main:
-            burglar_results = None  # sentinel: reuse main detections downstream
-        else:
-            try:
-                burglar_results = burglar_model.predict(
-                    source=frames,
-                    conf=threshold,
-                    imgsz=yolo_imgsz,
-                    stream=False,
-                    verbose=False,
-                )
-            except Exception as e:
-                print(f"[InferenceServer] Burglar batch error: {e}")
-                burglar_results = [None] * len(batch)
+        # ── Batch YOLO inference — secondary models (one GPU call each) ───
+        # _sec_results: {name: [Result, ...] | None}
+        # None = same_as_main sentinel; caller resolves to main_dets downstream.
+        _sec_results: dict = {}
+        for name, (m, same_as_main) in _secondary.items():
+            if same_as_main:
+                _sec_results[name] = None
+            else:
+                try:
+                    _sec_results[name] = m.predict(
+                        source=frames,
+                        conf=threshold,
+                        imgsz=yolo_imgsz,
+                        stream=False,
+                        verbose=False,
+                    )
+                except Exception as e:
+                    print(f"[InferenceServer] Model '{name}' batch error: {e}")
+                    _sec_results[name] = [None] * len(batch)
 
         # ── Route results to per-camera queues ────────────────────────────
         # Frames are JPEG-encoded before entering the Manager Queue to reduce
         # IPC data volume from ~900 KB (raw BGR numpy) to ~50 KB per frame.
         for i, (cam_id, frame, ts) in enumerate(zip(cam_ids, frames, tss)):
-            detections = _parse_result(
-                main_results[i] if i < len(main_results) else None
-            )
-            gloves_dets = (
-                None if gloves_results is None
-                else _parse_result(gloves_results[i] if i < len(gloves_results) else None)
-            )
-            burglar_dets = (
-                None if burglar_results is None
-                else _parse_result(burglar_results[i] if i < len(burglar_results) else None)
-            )
+            main_dets = _parse_result(main_results[i] if i < len(main_results) else None)
+
+            extra_dets: dict = {}
+            for name, results in _sec_results.items():
+                extra_dets[name] = (
+                    None   # sentinel: caller uses main_dets
+                    if results is None
+                    else _parse_result(results[i] if i < len(results) else None)
+                )
 
             ret, jpeg = _cv2.imencode(".jpg", frame, [_cv2.IMWRITE_JPEG_QUALITY, 80])
             frame_payload = jpeg.tobytes() if ret else None
@@ -232,17 +215,14 @@ def inference_server_loop(
             q = _get_result_queue(cam_id)
             if q is None:
                 continue
+            payload = (cam_id, frame_payload, ts, main_dets, extra_dets)
             try:
-                q.put_nowait(
-                    (cam_id, frame_payload, ts, detections, gloves_dets, burglar_dets)
-                )
+                q.put_nowait(payload)
             except Exception:
                 # Queue full — evict oldest then retry once
                 try:
                     q.get_nowait()
-                    q.put_nowait(
-                        (cam_id, frame_payload, ts, detections, gloves_dets, burglar_dets)
-                    )
+                    q.put_nowait(payload)
                 except Exception:
                     pass   # drop silently
 

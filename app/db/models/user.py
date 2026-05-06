@@ -12,6 +12,6 @@ class User(Base):
     role = Column(String(16), nullable=False, default="operator")
     is_active = Column(Boolean, default=True, nullable=False)
     
-    acknowledged_alerts = relationship("Alert", back_populates="acknowledger", foreign_keys="Alert.acknowledged_by")[cite: 3, 4]
-    acknowledged_burglar_events = relationship("BurglarAlarmEvent", back_populates="acknowledger", foreign_keys="BurglarAlarmEvent.acknowledged_by")[cite: 3, 4]
-    password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")[cite: 3, 4]
+    acknowledged_alerts = relationship("Alert", back_populates="acknowledger", foreign_keys="Alert.acknowledged_by")
+    acknowledged_burglar_events = relationship("BurglarAlarmEvent", back_populates="acknowledger", foreign_keys="BurglarAlarmEvent.acknowledged_by")
+    password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")

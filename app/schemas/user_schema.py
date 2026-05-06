@@ -109,9 +109,9 @@ def _user_dict(u: User) -> dict:
         "last_login": u.last_login,
     }
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+# class LoginRequest(BaseModel):
+#     username: str
+#     password: str
 
 
 class TokenResponse(BaseModel):

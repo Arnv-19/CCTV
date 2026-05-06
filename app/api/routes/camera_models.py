@@ -16,10 +16,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import CameraModel, User
+# from app.db.models import CameraModel, User
+from app.db.models.camera import Camera
 from app.dependencies import get_current_user, require_admin
 from app.services.camera_manager import camera_manager
 from app.schemas.camera_model_schemas import ModelToggle, ModelPatch, _row_dict
+from app.db.models.camera_model import CameraModel
+from app.db.models.user import User
 router = APIRouter()
 
 

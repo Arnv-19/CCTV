@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, UniqueConstraint, Text
 from sqlalchemy.orm import relationship
 from app.db.database import Base
 
@@ -28,7 +28,6 @@ class AIModel(Base):
     created_at           = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # ── Relationships ─────────────────────────────────────────────────────
-    classes           = relationship("ModelClass", back_populates="model", cascade="all, delete-orphan")[cite: 3, 4]
-    camera_assignments = relationship("CameraModelAssignment", back_populates="model", cascade="all, delete-orphan")[cite: 3, 4]
-
+    classes           = relationship("ModelClass", back_populates="model", cascade="all, delete-orphan")
+    camera_assignments = relationship("CameraModelAssignment", back_populates="model", cascade="all, delete-orphan")
 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from app.db.models import CameraModel
+from app.db.models.camera_model   import CameraModel
 
 
 class ModelToggle(BaseModel):

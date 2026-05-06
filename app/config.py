@@ -92,5 +92,8 @@ def get_config() -> dict:
     cfg.setdefault("inference_fps", 4)
     # Frames batched per GPU forward pass — higher = better GPU utilisation
     cfg.setdefault("inference_batch_size", 8)
+    # Extra models loaded alongside main model — add new models here without code changes
+    # e.g. {"vehicle": "weights/vehicle_model.pt", "fire": "weights/fire_model.pt"}
+    cfg.setdefault("extra_models", {})
 
     return cfg
