@@ -17,7 +17,7 @@ import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 
 // Known AI model names — extend as new models are added to the backend
-const KNOWN_MODELS = ['helmet_detection', 'gloves_detection', 'vest_detection', 'glasses_detection', 'mask_detection', 'fire_detection']
+const KNOWN_MODELS = ['helmet_detection', 'gloves_detection', 'vest_detection', 'glasses_detection', 'mask_detection']
 
 function Section({ title, children }) {
   return (

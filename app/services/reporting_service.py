@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Iterable
+from zoneinfo import ZoneInfo
 from xml.sax.saxutils import escape
 
 from app.config import get_config
@@ -14,6 +15,7 @@ from app.db.models import Alert
 
 
 REPORT_HEADERS = [
+    "DATE",
     "TIME",
     "CAMERA ID",
     "LOCATION",
@@ -59,9 +61,12 @@ VIOLATION_BUCKETS = {
     "after_hours": "off_hours",
 }
 
+IST_TZ = ZoneInfo("Asia/Kolkata")
+
 
 @dataclass
 class DailyReportRow:
+    date: str
     time: str
     camera_id: int
     location: str
@@ -74,6 +79,7 @@ class DailyReportRow:
 
     def as_list(self) -> list[str | int]:
         return [
+            self.date,
             self.time,
             self.camera_id,
             self.location,
@@ -84,6 +90,14 @@ class DailyReportRow:
             self.safe_zone,
             self.off_hours,
         ]
+
+
+@dataclass
+class ReportRenderContext:
+    report_label: str
+    filename_date_label: str
+    generated_at_label: str
+    total_rows: int
 
 
 def _normalize_key(value: str | None) -> str:
@@ -115,10 +129,10 @@ def _camera_location_map() -> dict[int, str]:
 
 
 def _resolve_location(camera_id: int, location_map: dict[int, str]) -> str:
-    if camera_id in location_map:
-        return location_map[camera_id]
     if (camera_id - 1) in location_map:
         return location_map[camera_id - 1]
+    if camera_id in location_map:
+        return location_map[camera_id]
     return f"Camera {camera_id}"
 
 
@@ -135,33 +149,27 @@ def build_daily_report_rows(
     include_dummy_data: bool = False,
 ) -> list[DailyReportRow]:
     location_map = _camera_location_map()
-    grouped: dict[tuple[int, str], dict[str, object]] = {}
-
+    rows: list[DailyReportRow] = []
     for alert in sorted(alerts, key=lambda item: (item.triggered_at, item.camera_id, item.id)):
+        row_date = (alert.triggered_at or datetime.utcnow()).strftime("%Y-%m-%d")
         row_time = (alert.triggered_at or datetime.utcnow()).strftime("%H:%M:%S")
-        key = (alert.camera_id, row_time)
-        if key not in grouped:
-            grouped[key] = {
-                "time": row_time,
-                "camera_id": alert.camera_id,
-                "location": _resolve_location(alert.camera_id, location_map),
-                "without_helmet": 0,
-                "without_boot": 0,
-                "without_gloves": 0,
-                "without_vest": 0,
-                "safe_zone": "NO",
-                "off_hours": "NO",
-            }
-
         bucket = _bucket_for_alert(alert)
-        if bucket in {"without_helmet", "without_boot", "without_gloves", "without_vest"}:
-            grouped[key][bucket] = int(grouped[key][bucket]) + 1
-        elif bucket == "safe_zone":
-            grouped[key]["safe_zone"] = "YES"
-        elif bucket == "off_hours":
-            grouped[key]["off_hours"] = "YES"
-
-    rows = [DailyReportRow(**item) for item in grouped.values()]
+        rows.append(
+            DailyReportRow(
+                date=row_date,
+                time=row_time,
+                camera_id=alert.camera_id,
+                location=_resolve_location(alert.camera_id, location_map),
+                without_helmet=1 if bucket == "without_helmet" else 0,
+                without_boot=1 if bucket == "without_boot" else 0,
+                without_gloves=1 if bucket == "without_gloves" else 0,
+                without_vest=1 if bucket == "without_vest" else 0,
+                safe_zone="YES" if bucket == "safe_zone" else "NO",
+                off_hours="YES" if bucket == "off_hours" else "NO",
+            )
+        )
+    if not rows and include_dummy_data:
+        return build_dummy_report_rows(report_date)
     return rows
 
 
@@ -176,6 +184,7 @@ def build_dummy_report_rows(report_date: date) -> list[DailyReportRow]:
     for row_time, camera_id, helmet, boot, gloves, vest, safe_zone, off_hours in samples:
         rows.append(
             DailyReportRow(
+                date=report_date.isoformat(),
                 time=row_time,
                 camera_id=camera_id,
                 location=f"Plant {camera_id}",
@@ -191,11 +200,65 @@ def build_dummy_report_rows(report_date: date) -> list[DailyReportRow]:
 
 
 def build_daily_report_filename(report_date: date, extension: str) -> str:
-    return f"daily_alert_report_{report_date.isoformat()}.{extension.lstrip('.')}"
+    return build_report_filename(report_date.isoformat(), extension)
 
 
-def render_daily_report_xlsx(rows: list[DailyReportRow], report_date: date) -> bytes:
-    sheet_rows = [REPORT_HEADERS] + [row.as_list() for row in rows]
+def build_report_filename(date_label: str, extension: str) -> str:
+    safe_label = (date_label or "report").strip().replace(" ", "_").replace("/", "-")
+    return f"daily_alert_report_{safe_label}.{extension.lstrip('.')}"
+
+
+def build_report_context(
+    *,
+    report_date: date,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    total_rows: int = 0,
+) -> ReportRenderContext:
+    if date_from and date_to:
+        if date_from == date_to:
+            label = date_from.isoformat()
+            report_label = f"Report Date: {label}"
+            filename_label = label
+        else:
+            report_label = f"Report Date: {date_from.isoformat()} to {date_to.isoformat()}"
+            filename_label = f"{date_from.isoformat()}_to_{date_to.isoformat()}"
+    elif date_from:
+        label = date_from.isoformat()
+        report_label = f"Report Date: {label}"
+        filename_label = label
+    elif date_to:
+        label = date_to.isoformat()
+        report_label = f"Report Date: {label}"
+        filename_label = label
+    else:
+        label = report_date.isoformat()
+        report_label = f"Report Date: {label}"
+        filename_label = label
+
+    generated_at = datetime.now(IST_TZ).strftime("%I:%M:%S %p IST").lstrip("0")
+    return ReportRenderContext(
+        report_label=report_label,
+        filename_date_label=filename_label,
+        generated_at_label=f"Generated At: {generated_at}",
+        total_rows=total_rows,
+    )
+
+
+def render_daily_report_xlsx(
+    rows: list[DailyReportRow],
+    report_date: date,
+    context: ReportRenderContext | None = None,
+) -> bytes:
+    context = context or build_report_context(report_date=report_date, total_rows=len(rows))
+    sheet_rows = [
+        ["AXIS CCTV ALERT REPORT"],
+        [context.report_label],
+        [context.generated_at_label],
+        [f"Total Rows: {context.total_rows}"],
+        [],
+        REPORT_HEADERS,
+    ] + [row.as_list() for row in rows]
     shared_strings: list[str] = []
     string_index: dict[str, int] = {}
 
@@ -218,7 +281,7 @@ def render_daily_report_xlsx(rows: list[DailyReportRow], report_date: date) -> b
         cells = []
         for col_idx, value in enumerate(row, start=1):
             cell_ref = f"{col_name(col_idx)}{row_idx}"
-            style_id = "1" if row_idx == 1 else "0"
+            style_id = "1" if row_idx in {1, 2, 3, 4, 6} else "0"
             if isinstance(value, int):
                 cells.append(f'<c r="{cell_ref}" s="{style_id}"><v>{value}</v></c>')
             else:
@@ -236,12 +299,19 @@ def render_daily_report_xlsx(rows: list[DailyReportRow], report_date: date) -> b
         '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
         '<sheetFormatPr defaultRowHeight="18"/>'
         '<cols>'
-        '<col min="1" max="1" width="14" customWidth="1"/>'
-        '<col min="2" max="2" width="12" customWidth="1"/>'
-        '<col min="3" max="3" width="24" customWidth="1"/>'
-        '<col min="4" max="9" width="16" customWidth="1"/>'
+        '<col min="1" max="1" width="22" customWidth="1"/>'
+        '<col min="2" max="2" width="14" customWidth="1"/>'
+        '<col min="3" max="3" width="12" customWidth="1"/>'
+        '<col min="4" max="4" width="24" customWidth="1"/>'
+        '<col min="5" max="10" width="16" customWidth="1"/>'
         '</cols>'
         f'<sheetData>{"".join(row_xml_parts)}</sheetData>'
+        '<mergeCells count="4">'
+        '<mergeCell ref="A1:J1"/>'
+        '<mergeCell ref="A2:J2"/>'
+        '<mergeCell ref="A3:J3"/>'
+        '<mergeCell ref="A4:J4"/>'
+        '</mergeCells>'
         '</worksheet>'
     )
 
@@ -321,7 +391,7 @@ def render_daily_report_xlsx(rows: list[DailyReportRow], report_date: date) -> b
         'xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
         '<dc:title>Daily Safety Alert Report</dc:title>'
         '<dc:creator>Axis CCTV</dc:creator>'
-        f'<dc:description>Daily report for {report_date.isoformat()}</dc:description>'
+        f'<dc:description>{escape(context.report_label)}</dc:description>'
         '</cp:coreProperties>'
     )
     app_xml = (
@@ -353,17 +423,19 @@ def render_daily_report_xlsx(rows: list[DailyReportRow], report_date: date) -> b
     return output.getvalue()
 
 
-def render_daily_report_pdf(rows: list[DailyReportRow], report_date: date) -> bytes:
+def render_daily_report_pdf(
+    rows: list[DailyReportRow],
+    report_date: date,
+    context: ReportRenderContext | None = None,
+) -> bytes:
+    context = context or build_report_context(report_date=report_date, total_rows=len(rows))
     title = "AXIS CCTV ALERT REPORT"
-    subtitle = f"Report Date: {report_date.isoformat()}"
-    generated_at = f"Generated At: {datetime.utcnow().strftime('%H:%M:%S')} UTC"
-    total_rows = f"Total Rows: {len(rows)}"
     summary = _build_report_summary(rows)
     table_rows = [[str(value) for value in row.as_list()] for row in rows]
     return _render_table_pdf(
         title=title,
-        subtitle=subtitle,
-        metadata=[generated_at, total_rows],
+        subtitle=context.report_label,
+        metadata=[context.generated_at_label, f"Total Rows: {context.total_rows}"],
         summary=summary,
         headers=REPORT_HEADERS,
         rows=table_rows,
@@ -379,11 +451,11 @@ def _build_report_summary(rows: list[DailyReportRow]) -> list[tuple[str, str]]:
     off_hours_hits = sum(1 for row in rows if row.off_hours == "YES")
     unique_cameras = len({row.camera_id for row in rows})
     return [
-        ("Cameras Covered", str(unique_cameras)),
+        ("Vest Alerts", str(total_vest)),
         ("Helmet Alerts", str(total_helmet)),
         ("Boot Alerts", str(total_boot)),
         ("Gloves Alerts", str(total_gloves)),
-        ("Vest Alerts", str(total_vest)),
+        ("Cameras Covered", str(unique_cameras)),
         ("Safe Zone Flags", str(safe_zone_hits)),
         ("Off Hours Flags", str(off_hours_hits)),
     ]
@@ -421,11 +493,13 @@ def _render_table_pdf(
 ) -> bytes:
     page_width = 842
     page_height = 595
-    margin_x = 34
+    margin_x = 20
     top_margin = 36
-    bottom_margin = 42
+    bottom_margin = 16
     content_width = page_width - (margin_x * 2)
-    col_widths = [60, 60, 134, 80, 74, 84, 74, 78, 78]
+    col_widths = [76, 56, 54, 108, 66, 64, 72, 66, 68, 68]
+    table_width = sum(col_widths)
+    table_x = margin_x
     x_positions = [margin_x]
     for width in col_widths:
         x_positions.append(x_positions[-1] + width)
@@ -434,20 +508,31 @@ def _render_table_pdf(
     header_height = max(len(lines) for lines in header_lines) * 11 + 12
     row_height = 20
     title_block_height = 182
-    footer_height = 32
-    table_top = page_height - top_margin - title_block_height
-    usable_height = table_top - bottom_margin - footer_height
-    rows_per_page = max(1, math.floor((usable_height - header_height) / row_height))
-    total_pages = max(1, math.ceil(max(1, len(rows)) / rows_per_page))
+    footer_height = 40
+    page_label_height = 20
+    first_page_table_top = page_height - top_margin - title_block_height
+    other_page_table_top = page_height - top_margin - 8
+    first_page_usable_height = first_page_table_top - bottom_margin - footer_height - page_label_height
+    other_page_usable_height = other_page_table_top - bottom_margin - page_label_height
+    first_page_rows_per_page = max(1, math.floor((first_page_usable_height - header_height) / row_height))
+    other_page_rows_per_page = max(1, math.floor((other_page_usable_height - header_height) / row_height))
 
     page_streams: list[bytes] = []
     if not rows:
-        rows = [["-", "-", "No alerts found for this date.", "-", "-", "-", "-", "-", "-"]]
+        rows = [["-", "-", "-", "No alerts found for this date.", "-", "-", "-", "-", "-", "-"]]
 
-    for page_index in range(total_pages):
-        start = page_index * rows_per_page
-        end = start + rows_per_page
-        page_rows = rows[start:end]
+    page_slices: list[list[list[str]]] = []
+    start = 0
+    while start < len(rows):
+        if not page_slices:
+            page_size = first_page_rows_per_page
+        else:
+            page_size = other_page_rows_per_page
+        page_slices.append(rows[start:start + page_size])
+        start += page_size
+    total_pages = max(1, len(page_slices))
+
+    for page_index, page_rows in enumerate(page_slices):
         commands: list[str] = []
 
         def draw_text(x: float, y: float, text: str, *, font: str = "F1", size: int = 10) -> None:
@@ -467,61 +552,63 @@ def _render_table_pdf(
             operator = "f" if fill else "S"
             commands.append(f"{x:.2f} {y:.2f} {width:.2f} {height:.2f} re {operator}")
 
-        # Brand header
-        set_fill_color(0.145, 0.180, 0.212)
-        draw_rect(margin_x, page_height - top_margin - 50, content_width, 44, fill=True)
-        set_fill_color(1.000, 0.522, 0.212)
-        draw_rect(margin_x, page_height - top_margin - 50, 10, 44, fill=True)
-        set_fill_color(1.000, 1.000, 1.000)
-        draw_text(margin_x + 20, page_height - top_margin - 22, title, font="F2", size=18)
-        set_fill_color(0.733, 0.749, 0.765)
-        draw_text(margin_x + 20, page_height - top_margin - 38, subtitle, font="F1", size=9)
-        draw_text(margin_x + 220, page_height - top_margin - 38, metadata[0], font="F1", size=9)
-        draw_text(margin_x + 455, page_height - top_margin - 38, metadata[1], font="F1", size=9)
-
-        brand_center_x = page_width - margin_x - 116
-        set_fill_color(0.505, 0.545, 0.584)
-        draw_text(brand_center_x, page_height - top_margin - 24, "AXIS", font="F2", size=22)
-        set_fill_color(1.000, 1.000, 1.000)
-        draw_text(page_width - margin_x - 92, page_height - top_margin - 38, f"Page {page_index + 1}/{total_pages}", font="F1", size=9)
-
-        set_stroke_color(1.000, 0.522, 0.212)
-        draw_line(margin_x, page_height - top_margin - 58, page_width - margin_x, page_height - top_margin - 58, 1.4)
-
-        # Summary strip
-        summary_top = page_height - top_margin - 74
-        summary_box_height = 54
-        summary_gap = 8
-        summary_items = summary[:4]
-        summary_width = (content_width - (summary_gap * (len(summary_items) - 1))) / max(1, len(summary_items))
-        for idx, (label, value) in enumerate(summary_items):
-            box_x = margin_x + idx * (summary_width + summary_gap)
-            set_fill_color(0.972, 0.976, 0.980)
-            draw_rect(box_x, summary_top - summary_box_height, summary_width, summary_box_height, fill=True)
-            set_stroke_color(0.875, 0.906, 0.933)
-            draw_rect(box_x, summary_top - summary_box_height, summary_width, summary_box_height, fill=False)
+        if page_index == 0:
+            # Brand header only on first page
+            set_fill_color(0.145, 0.180, 0.212)
+            draw_rect(margin_x, page_height - top_margin - 50, content_width, 44, fill=True)
             set_fill_color(1.000, 0.522, 0.212)
-            draw_text(box_x + 10, summary_top - 18, value, font="F2", size=16)
-            set_fill_color(0.255, 0.318, 0.373)
-            draw_text(box_x + 10, summary_top - 34, label, font="F1", size=8)
+            draw_rect(margin_x, page_height - top_margin - 50, 10, 44, fill=True)
+            set_fill_color(1.000, 1.000, 1.000)
+            draw_text(margin_x + 20, page_height - top_margin - 22, title, font="F2", size=18)
+            set_fill_color(0.733, 0.749, 0.765)
+            draw_text(margin_x + 20, page_height - top_margin - 38, subtitle, font="F1", size=9)
+            draw_text(margin_x + 220, page_height - top_margin - 38, metadata[0], font="F1", size=9)
+            draw_text(margin_x + 455, page_height - top_margin - 38, metadata[1], font="F1", size=9)
 
-        notes_top = summary_top - summary_box_height - 16
-        notes_height = 28
-        set_fill_color(0.925, 0.941, 0.957)
-        draw_rect(margin_x, notes_top - notes_height, content_width, notes_height, fill=True)
-        set_stroke_color(0.875, 0.906, 0.933)
-        draw_rect(margin_x, notes_top - notes_height, content_width, notes_height, fill=False)
-        set_fill_color(0.145, 0.180, 0.212)
-        draw_text(margin_x + 10, notes_top - 18, "Quick Snapshot", font="F2", size=9)
-        snapshot_text = (
-            f"Safe Zone Flags: {summary[5][1]}   |   Off Hours Flags: {summary[6][1]}   |   Rows Included: {metadata[1].split(': ')[1]}"
-        )
-        draw_text(margin_x + 118, notes_top - 18, snapshot_text, font="F1", size=8)
+            brand_center_x = page_width - margin_x - 116
+            set_fill_color(0.505, 0.545, 0.584)
+            draw_text(brand_center_x, page_height - top_margin - 24, "AXIS", font="F2", size=22)
+
+            set_stroke_color(1.000, 0.522, 0.212)
+            draw_line(margin_x, page_height - top_margin - 58, page_width - margin_x, page_height - top_margin - 58, 1.4)
+
+            # Summary strip only on first page
+            summary_top = page_height - top_margin - 74
+            summary_box_height = 54
+            summary_gap = 8
+            summary_items = summary[:4]
+            summary_width = (content_width - (summary_gap * (len(summary_items) - 1))) / max(1, len(summary_items))
+            for idx, (label, value) in enumerate(summary_items):
+                box_x = margin_x + idx * (summary_width + summary_gap)
+                set_fill_color(0.972, 0.976, 0.980)
+                draw_rect(box_x, summary_top - summary_box_height, summary_width, summary_box_height, fill=True)
+                set_stroke_color(0.875, 0.906, 0.933)
+                draw_rect(box_x, summary_top - summary_box_height, summary_width, summary_box_height, fill=False)
+                set_fill_color(1.000, 0.522, 0.212)
+                draw_text(box_x + 10, summary_top - 18, value, font="F2", size=16)
+                set_fill_color(0.255, 0.318, 0.373)
+                draw_text(box_x + 10, summary_top - 34, label, font="F1", size=8)
+
+            notes_top = summary_top - summary_box_height - 16
+            notes_height = 28
+            set_fill_color(0.925, 0.941, 0.957)
+            draw_rect(margin_x, notes_top - notes_height, content_width, notes_height, fill=True)
+            set_stroke_color(0.875, 0.906, 0.933)
+            draw_rect(margin_x, notes_top - notes_height, content_width, notes_height, fill=False)
+            set_fill_color(0.145, 0.180, 0.212)
+            draw_text(margin_x + 10, notes_top - 18, "Quick Snapshot", font="F2", size=9)
+            snapshot_text = (
+                f"Cameras Covered: {summary[4][1]}   |   Safe Zone Flags: {summary[5][1]}   |   Off Hours Flags: {summary[6][1]}   |   Rows Included: {metadata[1].split(': ')[1]}"
+            )
+            draw_text(margin_x + 118, notes_top - 18, snapshot_text, font="F1", size=8)
+            table_top = first_page_table_top
+        else:
+            table_top = other_page_table_top
 
         header_top = table_top
         header_bottom = header_top - header_height
         set_fill_color(0.925, 0.941, 0.957)
-        draw_rect(margin_x, header_bottom, content_width, header_height, fill=True)
+        draw_rect(table_x, header_bottom, table_width, header_height, fill=True)
         for idx, wrapped_lines in enumerate(header_lines):
             cell_x = x_positions[idx]
             for line_idx, line in enumerate(wrapped_lines):
@@ -533,7 +620,7 @@ def _render_table_pdf(
             next_y = current_y - row_height
             if row_index % 2 == 0:
                 set_fill_color(0.972, 0.976, 0.980)
-                draw_rect(margin_x, next_y, content_width, row_height, fill=True)
+                draw_rect(table_x, next_y, table_width, row_height, fill=True)
             for idx, value in enumerate(row):
                 text = value
                 max_chars = max(4, math.floor((col_widths[idx] - 8) / 5))
@@ -549,22 +636,31 @@ def _render_table_pdf(
             draw_line(x, header_top, x, bottom_y, 0.7)
         draw_line(x_positions[-1], header_top, x_positions[-1], bottom_y, 0.7)
         set_stroke_color(0.255, 0.318, 0.373)
-        draw_line(margin_x, header_top, margin_x + content_width, header_top, 0.9)
-        draw_line(margin_x, header_bottom, margin_x + content_width, header_bottom, 0.9)
+        draw_line(table_x, header_top, table_x + table_width, header_top, 0.9)
+        draw_line(table_x, header_bottom, table_x + table_width, header_bottom, 0.9)
         for line_idx in range(len(page_rows)):
             y = header_bottom - ((line_idx + 1) * row_height)
-            draw_line(margin_x, y, margin_x + content_width, y, 0.5)
+            draw_line(table_x, y, table_x + table_width, y, 0.5)
 
-        # Footer
-        set_fill_color(0.145, 0.180, 0.212)
-        draw_rect(margin_x, 14, content_width, 20, fill=True)
-        set_fill_color(1.000, 1.000, 1.000)
-        draw_text(margin_x + 8, 26, "AXIS Solutions Limited", font="F2", size=9)
-        draw_text(margin_x + 140, 26, "info@axisindia.in", font="F1", size=8)
-        draw_text(margin_x + 262, 26, "+91 90990 6354", font="F1", size=8)
-        draw_text(margin_x + 360, 26, "Ahmedabad, Gujarat, India", font="F1", size=8)
         set_fill_color(1.000, 0.522, 0.212)
-        draw_text(page_width - margin_x - 155, 26, "AXIS CCTV Monitoring Export", font="F2", size=8)
+        draw_text((page_width / 2) - 30, 18, f"Page {page_index + 1} of {total_pages}", font="F2", size=10)
+
+        if page_index == total_pages - 1:
+            # Footer only on last page
+            footer_y = 2
+            footer_h = 16
+            set_fill_color(0.145, 0.180, 0.212)
+            draw_rect(margin_x, footer_y, content_width, footer_h, fill=True)
+            set_fill_color(1.000, 0.522, 0.212)
+            draw_rect(margin_x, footer_y, 6, footer_h, fill=True)
+            draw_rect(page_width - margin_x - 6, footer_y, 6, footer_h, fill=True)
+            set_fill_color(1.000, 1.000, 1.000)
+            draw_text(margin_x + 12, 8, "AXIS Solutions Limited", font="F2", size=8)
+            draw_text(margin_x + 132, 8, "info@axisindia.in", font="F1", size=7)
+            draw_text(margin_x + 250, 8, "+91 90990 6354", font="F1", size=7)
+            draw_text(margin_x + 352, 8, "Ahmedabad, Gujarat, India", font="F1", size=7)
+            set_fill_color(1.000, 0.522, 0.212)
+            draw_text(page_width - margin_x - 178, 8, "AXIS CCTV Monitoring Export", font="F2", size=7)
         page_streams.append("\n".join(commands).encode("latin-1", errors="replace"))
 
     return _build_pdf_document(page_width, page_height, page_streams)
@@ -628,13 +724,15 @@ def save_report_artifacts(
     rows: list[DailyReportRow],
     report_date: date,
     output_dir: str | Path,
+    context: ReportRenderContext | None = None,
 ) -> dict[str, Path]:
+    context = context or build_report_context(report_date=report_date, total_rows=len(rows))
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    pdf_path = directory / build_daily_report_filename(report_date, "pdf")
-    xlsx_path = directory / build_daily_report_filename(report_date, "xlsx")
-    pdf_path.write_bytes(render_daily_report_pdf(rows, report_date))
-    xlsx_path.write_bytes(render_daily_report_xlsx(rows, report_date))
+    pdf_path = directory / build_report_filename(context.filename_date_label, "pdf")
+    xlsx_path = directory / build_report_filename(context.filename_date_label, "xlsx")
+    pdf_path.write_bytes(render_daily_report_pdf(rows, report_date, context))
+    xlsx_path.write_bytes(render_daily_report_xlsx(rows, report_date, context))
     return {"pdf": pdf_path, "xlsx": xlsx_path}
 
 
