@@ -150,8 +150,10 @@ class CameraManager:
         # Build per-camera config list from DB; fall back to config.yaml if empty
         camera_configs = self._build_camera_configs(cfg)
 
+        extra_models      = cfg.get("extra_models") or {}
+
         self._start_alert_writer()
-        self._launch_inference_servers(camera_configs, batch_size, inference_fps, yolo_imgsz)
+        self._launch_inference_servers(camera_configs, batch_size, inference_fps, yolo_imgsz, extra_models)
         self._launch_camera_workers(
             camera_configs, cooldown, snapshot_cooldown, yolo_imgsz, burglar_test_sound, inference_fps
         )
@@ -480,7 +482,8 @@ class CameraManager:
         }
 
     def _launch_inference_servers(
-        self, camera_configs: list, batch_size: int, inference_fps: float, yolo_imgsz: int
+        self, camera_configs: list, batch_size: int, inference_fps: float, yolo_imgsz: int,
+        extra_models: dict = None,
     ):
         """One InferenceServer process per unique main model path."""
         model_groups: dict[str, list] = {}
@@ -508,12 +511,23 @@ class CameraManager:
             stop_ev     = mp.Event()
             self._inference_stop_events[mk] = stop_ev
 
+            # Build the unified models dict: "main" is required; all others are optional.
+            # Keys "gloves" and "burglar" are consumed by result_handler_worker for
+            # MediaPipe overlay and KCF tracking respectively. Any other key is an
+            # extra model whose detections land in extra_dets in the result tuple.
+            _models: dict = {"main": mk}
+            gp = rep.get("gloves_model_path")
+            pp = rep.get("person_model_path")
+            if gp:
+                _models["gloves"] = gp
+            if pp:
+                _models["burglar"] = pp
+            _models.update(extra_models or {})
+
             srv = mp.Process(
                 target=inference_server_loop,
                 kwargs=dict(
-                    model_path=mk,
-                    gloves_model_path=rep.get("gloves_model_path"),
-                    burglar_person_model_path=rep.get("person_model_path"),
+                    models=_models,
                     frame_queue=fq,
                     result_queues=self.result_queues,
                     stop_event=stop_ev,

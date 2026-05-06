@@ -4,14 +4,17 @@ alarm_transport: usb
 burglar_test_sound: false
 camera_feeds:
 - 0
+- '1'
 camera_model_overrides: {}
 camera_titles:
+- Camera 1
 - Camera 1
 class_file: data/class_names.yaml
 confidence_threshold: 0.25
 detection_frame_height: 480
 detection_frame_width: 640
 esp_ip: ''
+extra_models: {}
 gloves_model_path: weights/best (3).pt
 inference_batch_size: 8
 inference_fps: 4

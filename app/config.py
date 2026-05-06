@@ -78,19 +78,22 @@ def get_config() -> dict:
     cfg.setdefault("alarm_http_token", "")   # optional ?token= query param
 
     # --- MQTT transport options ---
-    cfg.setdefault("mqtt_broker", "")
-    cfg.setdefault("mqtt_port", 1883)
-    cfg.setdefault("mqtt_username", "")
-    cfg.setdefault("mqtt_password", "")
-    cfg.setdefault("mqtt_topic", "skycctv/alarm")
-    cfg.setdefault("mqtt_client_id", "skycctv-ai")
-    cfg.setdefault("mqtt_qos", 1)
-    cfg.setdefault("mqtt_retain", False)
+    # cfg.setdefault("mqtt_broker", "")
+    # cfg.setdefault("mqtt_port", 1883)
+    # cfg.setdefault("mqtt_username", "")
+    # cfg.setdefault("mqtt_password", "")
+    # cfg.setdefault("mqtt_topic", "skycctv/alarm")
+    # cfg.setdefault("mqtt_client_id", "skycctv-ai")
+    # cfg.setdefault("mqtt_qos", 1)
+    # cfg.setdefault("mqtt_retain", False)
 
     # --- FPS and batch inference ---
     cfg.setdefault("ingestion_fps", 4)
     cfg.setdefault("inference_fps", 4)
     # Frames batched per GPU forward pass — higher = better GPU utilisation
     cfg.setdefault("inference_batch_size", 8)
+    # Extra models loaded alongside main model — add new models here without code changes
+    # e.g. {"vehicle": "weights/vehicle_model.pt", "fire": "weights/fire_model.pt"}
+    cfg.setdefault("extra_models", {})
 
     return cfg
