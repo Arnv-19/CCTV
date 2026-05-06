@@ -37,7 +37,7 @@ http.interceptors.response.use(
 )
 
 function getDevStreamCandidates() {
-  const portsStr = (import.meta.env.VITE_STREAM_PORTS || '8000,8010').trim()
+  const portsStr = (import.meta.env.VITE_STREAM_PORTS || '8000').trim()
   const ports = portsStr.split(',').map(p => p.trim()).filter(Boolean)
   if (typeof window === 'undefined') {
     return ports.map(p => `http://127.0.0.1:${p}/api`)

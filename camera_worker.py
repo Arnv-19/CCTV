@@ -65,19 +65,18 @@ def start_ffmpeg(rtsp_url: str, width: int = 960, height: int = 720) -> subproce
     fps = start_ffmpeg.ingestion_fps if hasattr(start_ffmpeg, "ingestion_fps") else 4
     cmd = [
         "ffmpeg",
-        "-loglevel", "error",
+        "-loglevel", "warning",
         "-rtsp_transport", "tcp",
+        "-stimeout", "10000000",   # 10s connection timeout (microseconds)
         "-i", rtsp_url,
-        "-vf", f"scale={width}:{height},fps={fps}",
-        "-f", "image2pipe",
-        "-pix_fmt", "bgr24",
-        "-vcodec", "rawvideo",
+        "-vf", f"scale={width}:{height},fps={fps},format=bgr24",
+        "-f", "rawvideo",
         "-"
     ]
     return subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,   # capture so we can log errors
         bufsize=10 ** 8,
     )
 
@@ -1148,6 +1147,16 @@ def ingestion_worker(
                 _buf["frame"] = arr.copy()
                 _buf["ts"]    = time.time()
 
+    def _ffmpeg_stderr_logger(proc):
+        """Print FFmpeg stderr lines so connection errors appear in server logs."""
+        try:
+            for line in proc.stderr:
+                msg = line.decode(errors="replace").rstrip()
+                if msg:
+                    print(f"[FFmpeg cam{cam_id}] {msg}", flush=True)
+        except Exception:
+            pass
+
     def _start_ffmpeg_ing():
         nonlocal ffmpeg_proc_ing
         if ffmpeg_proc_ing is not None:
@@ -1160,6 +1169,11 @@ def ingestion_worker(
         if ffmpeg_proc_ing:
             threading.Thread(
                 target=_ffmpeg_reader_ing,
+                args=(ffmpeg_proc_ing,),
+                daemon=True,
+            ).start()
+            threading.Thread(
+                target=_ffmpeg_stderr_logger,
                 args=(ffmpeg_proc_ing,),
                 daemon=True,
             ).start()
@@ -1210,14 +1224,22 @@ def ingestion_worker(
             resized = _cv2.resize(frame, (_ff_width, _ff_height))
         else:
             with _buf["lock"]:
-                age   = time.time() - _buf["ts"] if _buf["ts"] > 0 else 99.0
-                frame = _buf["frame"]
+                buf_ts = _buf["ts"]
+                frame  = _buf["frame"]
 
-            if age > 5.0:
+            # No frame yet — FFmpeg is still connecting; wait without counting as a stall
+            if buf_ts == 0:
+                time.sleep(0.1)
+                continue
+
+            age = time.time() - buf_ts
+            if age > 12.0:
                 reconnect_attempts += 1
+                print(f"[Ingestion {cam_id}] FFmpeg stall (age={age:.1f}s) — reconnect {reconnect_attempts}/{max_reconnect}", flush=True)
                 _start_ffmpeg_ing()
-                time.sleep(1.0)
+                time.sleep(2.0)
                 if reconnect_attempts >= max_reconnect:
+                    print(f"[Ingestion {cam_id}] Giving up after {max_reconnect} reconnects — check FFmpeg/RTSP above", flush=True)
                     break
                 continue
 
