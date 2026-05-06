@@ -132,29 +132,34 @@ def inference_server_loop(
         return _rq_cache.get(cam_id)
 
     while not stop_event.is_set():
-        # ── Collect a batch of frames (up to batch_timeout seconds) ───────
-        batch: list = []
-        deadline = time.time() + batch_timeout
-
-        while len(batch) < batch_size:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                break
-            try:
-                item = frame_queue.get(timeout=min(remaining, 0.01))
-            except Empty:
-                if time.time() >= deadline:
-                    break
-                continue
-
-            if item is None:   # stop sentinel
-                stop_event.set()
-                print("[InferenceServer] Received stop sentinel.")
-                return
-            batch.append(item)
-
-        if not batch:
+        # ── Wait for the first frame, then drain the queue ────────────────
+        # On CPU the inference cycle is slower than ingestion, so the queue
+        # accumulates stale frames. We always process the LATEST frame per
+        # camera — never a backlog — so the stream stays current.
+        try:
+            first = frame_queue.get(timeout=0.05)
+        except Empty:
             continue
+
+        if first is None:   # stop sentinel
+            stop_event.set()
+            print("[InferenceServer] Received stop sentinel.")
+            return
+
+        # Drain all queued frames; keep only the newest per camera.
+        latest: dict = {first[0]: first}
+        try:
+            while True:
+                item = frame_queue.get_nowait()
+                if item is None:
+                    stop_event.set()
+                    print("[InferenceServer] Received stop sentinel.")
+                    return
+                latest[item[0]] = item   # newer frame overwrites older
+        except Empty:
+            pass
+
+        batch = list(latest.values())
 
         cam_ids = [it[0] for it in batch]
         frames  = [it[1] for it in batch]
