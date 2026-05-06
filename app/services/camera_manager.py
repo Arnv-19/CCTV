@@ -60,9 +60,10 @@ class CameraManager:
     def __init__(self):
         self._mp_manager = mp.Manager()
 
-        # Shared state (cross-process via Manager proxy objects)
-        self.frame_dict  = self._mp_manager.dict()   # {cam_id: jpeg_bytes}
-        self.stats_dict  = self._mp_manager.dict()   # {cam_id: {status, fps, ...}}
+        # frame_dict is written only by result_handler_worker threads (main process),
+        # so a plain dict avoids Manager IPC on every frame — fixes event-loop blocking.
+        self.frame_dict  = {}                         # {cam_id: jpeg_bytes}
+        self.stats_dict  = self._mp_manager.dict()   # {cam_id: {status, fps, ...}} — written by subprocesses
         self.lock        = self._mp_manager.Lock()
 
         # Per-camera ingestion processes
@@ -391,8 +392,8 @@ class CameraManager:
     def _reset_state(self):
         self.processes.clear()
         self.stop_events.clear()
+        self.frame_dict.clear()
         with self.lock:
-            self.frame_dict.clear()
             self.stats_dict.clear()
         self._running = False
 
