@@ -19,6 +19,19 @@ import { useAuth } from '../contexts/AuthContext'
 // Known AI model names — extend as new models are added to the backend
 const KNOWN_MODELS = ['helmet_detection', 'gloves_detection', 'vest_detection', 'glasses_detection', 'mask_detection']
 
+function makeDraftCamera(index = 0) {
+  return {
+    id: null,
+    name: `Camera ${index + 1}`,
+    stream_url: '',
+    location: '',
+    is_active: true,
+    ingestion_fps: 4,
+    detection_width: 960,
+    detection_height: 720,
+  }
+}
+
 function Section({ title, children }) {
   return (
     <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 space-y-4">
@@ -201,27 +214,23 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
 
   const updateCamera = (i, field, val) => {
     setCfg(prev => {
-      const feeds  = [...(prev.camera_feeds  || [])]
-      const titles = [...(prev.camera_titles || [])]
-      if (field === 'url') feeds[i] = val
-      else titles[i] = val
-      return { ...prev, camera_feeds: feeds, camera_titles: titles }
+      const cameras = [...(prev.cameras || [])]
+      cameras[i] = { ...cameras[i], [field]: val }
+      return { ...prev, cameras }
     })
   }
 
   const addCamera = () => {
     setCfg(prev => ({
       ...prev,
-      camera_feeds:  [...(prev.camera_feeds  || []), ''],
-      camera_titles: [...(prev.camera_titles || []), `Camera ${(prev.camera_feeds || []).length}`],
+      cameras: [...(prev.cameras || []), makeDraftCamera((prev.cameras || []).length)],
     }))
   }
 
   const removeCamera = (i) => {
     setCfg(prev => ({
       ...prev,
-      camera_feeds:  prev.camera_feeds.filter((_,  idx) => idx !== i),
-      camera_titles: prev.camera_titles.filter((_, idx) => idx !== i),
+      cameras: (prev.cameras || []).filter((_, idx) => idx !== i),
     }))
   }
 
@@ -229,7 +238,8 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
     setSaving(true)
     setError(null)
     try {
-      await api.updateConfig(cfg)
+      const response = await api.updateConfig(cfg)
+      setCfg(response.config)
       onSaved?.()
     } catch (e) { setError(e.message) }
     finally { setSaving(false) }
@@ -243,7 +253,8 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
     </div>
   )
 
-  const cameraCount = (cfg.camera_feeds || []).length
+  const cameras = cfg.cameras || []
+  const cameraCount = cameras.length
   const system = systemMetrics?.system
   const process = systemMetrics?.process
 
@@ -290,20 +301,20 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
             <span>Title</span>
             <span />
           </div>
-          {(cfg.camera_feeds || []).map((url, i) => (
-            <div key={i} className="flex flex-col sm:grid sm:grid-cols-[1fr_180px_36px] gap-2 sm:items-center rounded-lg sm:rounded-none bg-slate-700/20 sm:bg-transparent p-2 sm:p-0">
+          {cameras.map((camera, i) => (
+            <div key={camera.id ?? `draft-${i}`} className="flex flex-col sm:grid sm:grid-cols-[1fr_180px_36px] gap-2 sm:items-center rounded-lg sm:rounded-none bg-slate-700/20 sm:bg-transparent p-2 sm:p-0">
               <input
                 className={inputCls}
-                value={url}
-                onChange={e => updateCamera(i, 'url', e.target.value)}
+                value={camera.stream_url || ''}
+                onChange={e => updateCamera(i, 'stream_url', e.target.value)}
                 placeholder="rtsp://..."
               />
               <div className="flex gap-2 sm:contents">
                 <input
                   className={`${inputCls} flex-1`}
-                  value={(cfg.camera_titles || [])[i] || ''}
-                  onChange={e => updateCamera(i, 'title', e.target.value)}
-                  placeholder={`Camera ${i}`}
+                  value={camera.name || ''}
+                  onChange={e => updateCamera(i, 'name', e.target.value)}
+                  placeholder={`Camera ${i + 1}`}
                 />
                 <button
                   onClick={() => removeCamera(i)}
@@ -408,12 +419,16 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
             Select which buzzers fire for each camera. Changes take effect on next camera start.
           </p>
           <div className="space-y-4">
-            {(cfg.camera_feeds || []).map((_, i) => (
-              <div key={i}>
+            {cameras.map((camera, i) => (
+              <div key={camera.id ?? `buzzer-${i}`}>
                 <div className="text-xs font-semibold text-slate-400 mb-1.5">
-                  {(cfg.camera_titles || [])[i] || `Camera ${i}`}
+                  {camera.name || `Camera ${i + 1}`}
                 </div>
-                <CameraBuzzers camId={i} allBuzzers={buzzers} />
+                {camera.id == null ? (
+                  <p className="text-xs text-slate-500">Save this camera first to assign buzzers.</p>
+                ) : (
+                  <CameraBuzzers camId={camera.id} allBuzzers={buzzers} />
+                )}
               </div>
             ))}
           </div>
@@ -427,12 +442,16 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
             Toggle which AI models run on each camera. Changes take effect on next camera start.
           </p>
           <div className="space-y-4">
-            {(cfg.camera_feeds || []).map((_, i) => (
-              <div key={i}>
+            {cameras.map((camera, i) => (
+              <div key={camera.id ?? `model-${i}`}>
                 <div className="text-xs font-semibold text-slate-400 mb-1.5">
-                  {(cfg.camera_titles || [])[i] || `Camera ${i}`}
+                  {camera.name || `Camera ${i + 1}`}
                 </div>
-                <CameraModels camId={i} canEdit={isAdmin} />
+                {camera.id == null ? (
+                  <p className="text-xs text-slate-500">Save this camera first to configure AI models.</p>
+                ) : (
+                  <CameraModels camId={camera.id} canEdit={isAdmin} />
+                )}
               </div>
             ))}
           </div>

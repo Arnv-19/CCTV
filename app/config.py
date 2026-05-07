@@ -96,4 +96,44 @@ def get_config() -> dict:
     # e.g. {"vehicle": "weights/vehicle_model.pt", "fire": "weights/fire_model.pt"}
     cfg.setdefault("extra_models", {})
 
+    # Overlay DB-backed configuration when PostgreSQL is available.
+    try:
+        from app.db.database import SessionLocal, ensure_database_connected
+        from app.db.models import AIModel, AppConfig, Camera
+
+        ensure_database_connected()
+        with SessionLocal() as db:
+            cameras = db.query(Camera).order_by(Camera.id).all()
+            if cameras:
+                cfg["camera_feeds"] = [cam.stream_url for cam in cameras]
+                cfg["camera_titles"] = [cam.name for cam in cameras]
+
+            app_cfg = db.query(AppConfig).filter(AppConfig.id == 1).first()
+            if app_cfg is not None:
+                cfg["confidence_threshold"] = app_cfg.confidence_threshold
+                cfg["alarm_cooldown_sec"] = app_cfg.alarm_cooldown_sec
+                cfg["burglar_test_sound"] = app_cfg.burglar_test_sound
+                cfg["esp_ip"] = app_cfg.esp_ip
+                cfg["use_wifi"] = app_cfg.use_wifi
+                cfg["alarm_transport"] = app_cfg.alarm_transport
+                cfg["alarm_http_token"] = app_cfg.alarm_http_token
+
+            slot_names = {
+                "model_path": "main_model",
+                "person_model_path": "person_model",
+                "gloves_model_path": "gloves_model",
+                "ppe_model_path": "ppe_model",
+            }
+            for cfg_key, model_name in slot_names.items():
+                row = (
+                    db.query(AIModel)
+                    .filter(AIModel.name == model_name)
+                    .order_by(AIModel.id)
+                    .first()
+                )
+                if row is not None and row.weight_path:
+                    cfg[cfg_key] = row.weight_path
+    except Exception:
+        pass
+
     return cfg

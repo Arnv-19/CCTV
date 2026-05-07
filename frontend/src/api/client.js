@@ -93,8 +93,8 @@ export const api = {
   // ── Cameras ───────────────────────────────────────────────────────────
   getCameras:   () => req('GET', '/cameras/'),
   getCameraMetrics: () => req('GET', '/cameras/metrics'),
-  addCamera:    (url, title) => req('POST', '/cameras/', { url, title }),
-  updateCamera: (id, url, title) => req('PUT', `/cameras/${id}`, { url, title }),
+  addCamera:    (body) => req('POST', '/cameras/', body),
+  updateCamera: (id, body) => req('PUT', `/cameras/${id}`, body),
   deleteCamera: (id) => req('DELETE', `/cameras/${id}`),
   startAll:     () => req('POST', '/cameras/start'),
   stopAll:      () => req('POST', '/cameras/stop'),
