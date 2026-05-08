@@ -78,13 +78,14 @@ def alert_writer_loop(queue: Queue):
                     ))
                 else:
                     db.add(Alert(
-                        camera_id        = item["camera_id"],
-                        model_name       = item.get("model_name", "ppe_detection"),
-                        violation_type   = item.get("violation_type", "violation"),
-                        confidence_score = item.get("confidence_score", 0.0),
-                        snapshot_path    = item.get("snapshot_path"),
-                        triggered_at     = _now_ist(),
-                        buzzer_activated = item.get("buzzer_activated", False),
+                        camera_id          = item["camera_id"],
+                        model_name         = item.get("model_name", "ppe_detection"),
+                        violation_type     = item.get("violation_type", "violation"),
+                        confidence_score   = item.get("confidence_score", 0.0),
+                        snapshot_path      = item.get("snapshot_path"),
+                        triggered_at       = _now_ist(),
+                        buzzer_activated   = item.get("buzzer_activated", False),
+                        session_tracker_id = item.get("session_tracker_id"),
                     ))
                 db.commit()
 

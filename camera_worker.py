@@ -23,6 +23,7 @@ import cv2
 import time
 import os
 import sys
+import uuid
 import subprocess
 import threading
 import numpy as np
@@ -1433,6 +1434,36 @@ def result_handler_worker(
     ba_last_saved_bbox   = None
     BA_IoU_THRESHOLD     = 0.3
 
+    # ── Per-person PPE violation trackers ─────────────────────────────────
+    # One KCF per violating person in frame. Each tracker covers ALL violation
+    # classes for that person — prevents re-alerting the same person while
+    # they remain visible. Each entry:
+    #   {"tracker": cv2.TrackerKCF, "bbox": [x1,y1,x2,y2],
+    #    "alerted": set of violation_keys already fired, "fails": int}
+    # One orange box is drawn per tracker — original red NH/NV boxes come
+    # from the "Draw detections" section unchanged.
+    _viol_trackers: list  = []
+    VIOL_MAX_FAILS        = 8
+    VIOL_IOU_THRESHOLD    = 0.10
+    VIOL_ORANGE           = (0, 165, 255)
+
+    def _viol_iou(b1, b2):
+        xi1, yi1 = max(b1[0], b2[0]), max(b1[1], b2[1])
+        xi2, yi2 = min(b1[2], b2[2]), min(b1[3], b2[3])
+        if xi2 <= xi1 or yi2 <= yi1:
+            return 0.0
+        inter = (xi2 - xi1) * (yi2 - yi1)
+        area1 = max(1, (b1[2]-b1[0]) * (b1[3]-b1[1]))
+        area2 = max(1, (b2[2]-b2[0]) * (b2[3]-b2[1]))
+        return inter / (area1 + area2 - inter)
+
+    def _find_tracker(bbox):
+        """Return the tracker entry whose bbox overlaps this detection, or None."""
+        for vt in _viol_trackers:
+            if _viol_iou(bbox, vt["bbox"]) > VIOL_IOU_THRESHOLD:
+                return vt
+        return None
+
     set_stats("running", 0, 0, 0)
 
     while True:
@@ -1501,19 +1532,20 @@ def result_handler_worker(
             )
 
         # ── Violation recording helper ─────────────────────────────────────
-        def record_violation(det, violation_type=None):
+        def record_violation(det, violation_type=None, allow_snapshot=True, session_tracker_id=None, skip_cooldown=False):
             nonlocal violations
             violation_name = violation_type or det.get("class", "violation")
             violation_key  = _class_key(violation_name)
             now = time.time()
             effective_cooldown = max(0.0, float(cooldown or 0))
-            if now - last_alarm_times.get(violation_key, 0) <= effective_cooldown:
-                return False
+            if not skip_cooldown:
+                if now - last_alarm_times.get(violation_key, 0) <= effective_cooldown:
+                    return False
             last_alarm_times[violation_key] = now
             violations += 1
 
             snap_path = None
-            if now - last_snapshot_times.get(violation_key, 0) > max(0.0, float(snapshot_cooldown or 0)):
+            if allow_snapshot and now - last_snapshot_times.get(violation_key, 0) > max(0.0, float(snapshot_cooldown or 0)):
                 snap_path = save_snapshot(resized, cam_id, snapshot_dir)
                 last_snapshot_times[violation_key] = now
 
@@ -1525,22 +1557,77 @@ def result_handler_worker(
 
             if alert_queue is not None:
                 alert_queue.put({
-                    "camera_id":        cam_id,
-                    "model_name":       "ppe_detection",
-                    "violation_type":   violation_name,
-                    "confidence_score": det.get("conf", 0.0),
-                    "snapshot_path":    snap_path,
-                    "buzzer_activated": buzzer_fired,
+                    "camera_id":           cam_id,
+                    "model_name":          "ppe_detection",
+                    "violation_type":      violation_name,
+                    "confidence_score":    det.get("conf", 0.0),
+                    "snapshot_path":       snap_path,
+                    "buzzer_activated":    buzzer_fired,
+                    "session_tracker_id":  session_tracker_id,
                 })
             log_violation_file(cam_id, frame_count, (violations / frame_count) * 100, violation_name)
             return True
 
+        # ── Step 1: update all active violation trackers ──────────────────
+        still_active = []
+        for vt in _viol_trackers:
+            ok, rect = vt["tracker"].update(resized)
+            if ok:
+                kx, ky, kw, kh = [int(v) for v in rect]
+                vt["bbox"]  = [kx, ky, kx + kw, ky + kh]
+                vt["fails"] = 0
+                still_active.append(vt)
+            else:
+                vt["fails"] += 1
+                if vt["fails"] < VIOL_MAX_FAILS:
+                    still_active.append(vt)
+                # else: person left frame — tracker dropped silently
+        _viol_trackers.clear()
+        _viol_trackers.extend(still_active)
+
+        # ── Step 2: draw ONE orange box per tracked person ────────────────
+        # Original red NH/NV boxes are drawn by "Draw detections" below.
+        for vt in _viol_trackers:
+            x1, y1, x2, y2 = vt["bbox"]
+            cv2.rectangle(resized, (x1, y1), (x2, y2), VIOL_ORANGE, 1)
+
+        # ── Step 3: check each violation — per person AND per class ───────
         logged_this_frame: set = set()
         for det in filtered_detections:
             vk = _class_key(det.get("class"))
-            if _is_violation_class(det.get("class")) and vk not in logged_this_frame:
-                if record_violation(det):
-                    logged_this_frame.add(vk)
+            if not _is_violation_class(det.get("class")):
+                continue
+            if vk in logged_this_frame:
+                continue
+
+            bbox = det.get("box")
+            existing = _find_tracker(bbox) if bbox else None
+
+            if existing is not None and vk in existing["alerted"]:
+                continue   # same person, same violation class — skip
+
+            # Only save a snapshot for the first detection of this person.
+            # If a tracker already exists, the person was photographed on their
+            # first violation — suppress the snapshot for any additional classes.
+            is_new_person = existing is None
+            session_id = str(uuid.uuid4()) if is_new_person else existing["session_id"]
+            if record_violation(det, allow_snapshot=is_new_person, session_tracker_id=session_id, skip_cooldown=True):
+                logged_this_frame.add(vk)
+                if bbox:
+                    if existing is not None:
+                        # Same person, new violation class (e.g. NH already tracked, now NV)
+                        existing["alerted"].add(vk)
+                    else:
+                        # New person — init tracker with a fresh session UUID
+                        new_t = init_kcf_tracker(resized, bbox)
+                        if new_t is not None:
+                            _viol_trackers.append({
+                                "tracker":    new_t,
+                                "bbox":       list(bbox),
+                                "alerted":    {vk},
+                                "fails":      0,
+                                "session_id": session_id,
+                            })
 
         # ── Burglar alarm (KCF tracking) ───────────────────────────────────
         if burglar_alarm_config and burglar_alarm_config.get("alarm_enabled"):

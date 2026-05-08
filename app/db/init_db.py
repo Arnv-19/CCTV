@@ -42,9 +42,11 @@ def create_tables():
         return
     print("[init_db] Creating tables...")
     Base.metadata.create_all(bind=engine)
-    # Lightweight migration for existing deployments.
+    # Lightweight migrations for existing deployments.
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(32)"))
+        conn.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS session_tracker_id VARCHAR(36)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_alerts_session_tracker_id ON alerts (session_tracker_id)"))
     print("[init_db] Tables created.")
 
 

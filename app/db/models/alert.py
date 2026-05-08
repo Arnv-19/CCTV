@@ -12,14 +12,15 @@ class Alert(Base):
     """
     __tablename__ = "alerts"
 
-    id               = Column(Integer, primary_key=True, index=True)
-    camera_id        = Column(Integer, ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True, index=True)
-    model_name       = Column(String(128), nullable=False)
-    violation_type   = Column(String(128), nullable=False)
-    confidence_score = Column(Float, nullable=False)
-    snapshot_path    = Column(Text, nullable=True)
-    triggered_at     = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    buzzer_activated = Column(Boolean, default=False, nullable=False)
+    id                 = Column(Integer, primary_key=True, index=True)
+    camera_id          = Column(Integer, ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True, index=True)
+    model_name         = Column(String(128), nullable=False)
+    violation_type     = Column(String(128), nullable=False)
+    confidence_score   = Column(Float, nullable=False)
+    snapshot_path      = Column(Text, nullable=True)
+    triggered_at       = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    buzzer_activated   = Column(Boolean, default=False, nullable=False)
+    session_tracker_id = Column(String(36), nullable=True, index=True)
 
     acknowledged     = Column(Boolean, default=False, nullable=False, index=True)
     acknowledged_by  = Column(Integer, ForeignKey("users.id"), nullable=True)
