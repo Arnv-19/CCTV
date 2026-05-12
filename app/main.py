@@ -35,6 +35,7 @@ from app.api.routes import auth, users, buzzers, camera_buzzers, camera_models, 
 from app.api.routes import burglar_alarm as burglar_alarm_router
 from app.api.routes import ai_models as ai_models_router
 from app.api.routes import camera_assignments as camera_assignments_router
+from app.api.routes import missing_person, crowd_alert, dynamic_fps, snapshot_whatsapp, burglar_alarm_verify
 
 
 class SafeStaticFiles(StaticFiles):
@@ -101,6 +102,11 @@ app.include_router(rois.router,            prefix="/api/rois",            tags=[
 app.include_router(burglar_alarm_router.router,       prefix="/api/burglar-alarm",        tags=["burglar-alarm"])
 app.include_router(ai_models_router.router,           prefix="/api/ai-models",            tags=["ai-models"])
 app.include_router(camera_assignments_router.router,  prefix="/api/camera-assignments",   tags=["camera-assignments"])
+app.include_router(missing_person.router,             prefix="/api/missing-person",       tags=["missing-person"])
+app.include_router(crowd_alert.router,                prefix="/api/crowd-alert",          tags=["crowd-alert"])
+app.include_router(dynamic_fps.router,                prefix="/api/dynamic-fps",          tags=["dynamic-fps"])
+app.include_router(snapshot_whatsapp.router,          prefix="/api/snapshot-whatsapp",    tags=["snapshot-whatsapp"])
+app.include_router(burglar_alarm_verify.router,       prefix="/api/burglar-alarm/verify", tags=["burglar-alarm"])
 
 
 # ── Health check (used by CI/CD deploy pipeline) ──────────────────────────

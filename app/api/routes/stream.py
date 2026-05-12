@@ -55,23 +55,29 @@ async def stream_camera(cam_id: int, request: Request):
     The stream runs indefinitely until the client disconnects.
     """
     async def generate():
+        last_frame = None
         try:
             while True:
-                # Important: break as soon as browser navigates away/unmounts <img>
-                # to avoid orphan MJPEG responses consuming connection slots.
                 if await request.is_disconnected():
                     break
 
                 frame = camera_manager.get_latest_frame(cam_id)
-                # Fall back to placeholder if camera hasn't produced a frame yet
                 jpeg = frame if frame is not None else PLACEHOLDER_JPEG
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                )
-                await asyncio.sleep(0.033)  # ~30 fps — prevents busy-looping the event loop
+
+                # Only push when the frame has changed — sending the same JPEG
+                # twice causes the browser to display it twice as long, which
+                # makes motion look like fast-forward followed by a freeze.
+                if jpeg is not last_frame:
+                    last_frame = jpeg
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+                    )
+
+                # 10 ms poll — catches new frames within one tick, keeps event
+                # loop free, and naturally paces output to the ingestion rate.
+                await asyncio.sleep(0.010)
         except asyncio.CancelledError:
-            # Client connection closed; exit generator cleanly.
             return
 
     return StreamingResponse(

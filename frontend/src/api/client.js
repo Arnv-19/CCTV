@@ -156,6 +156,19 @@ export const api = {
     return req('GET', `/alerts/daily-report.xlsx${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
   },
   sendDailyReportWhatsApp: (body = {}) => req('POST', '/alerts/daily-report/whatsapp', body),
+  sendSnapshotWhatsApp: (body = {}) => req('POST', '/snapshot-whatsapp/send', body),
+
+  // ── Safety feature configs ────────────────────────────────────────────
+  getMissingPersonConfig: () => req('GET', '/missing-person/config'),
+  updateMissingPersonConfig: (body) => req('PUT', '/missing-person/config', body),
+  getCrowdAlertConfig: () => req('GET', '/crowd-alert/config'),
+  updateCrowdAlertConfig: (body) => req('PUT', '/crowd-alert/config', body),
+  getDynamicFpsConfig: () => req('GET', '/dynamic-fps/config'),
+  updateDynamicFpsConfig: (body) => req('PUT', '/dynamic-fps/config', body),
+  getDynamicFpsRecommendations: (cpu_percent) =>
+    req('GET', `/dynamic-fps/recommendations${cpu_percent != null ? `?cpu_percent=${cpu_percent}` : ''}`),
+  applyDynamicFps: (cpu_percent) =>
+    req('POST', `/dynamic-fps/apply${cpu_percent != null ? `?cpu_percent=${cpu_percent}` : ''}`),
 
   // ── ROI Zones ─────────────────────────────────────────────────────────
   getRois:         (camId, activeOnly = false) =>
@@ -177,6 +190,7 @@ export const api = {
   upsertBurglarAlarmConfig:(camId, body)=> req('PUT',    `/burglar-alarm/${camId}`, body),
   deleteBurglarAlarmConfig:(camId)      => req('DELETE', `/burglar-alarm/${camId}`),
   getBurglarAlarmStatus:   (camId)      => req('GET',    `/burglar-alarm/${camId}/status`),
+  verifyBurglarAlarmAllCameras: ()      => req('GET',    '/burglar-alarm/verify/all-cameras'),
 
 
   // ── Logs ──────────────────────────────────────────────────────────────
