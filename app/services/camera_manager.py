@@ -42,6 +42,8 @@ from app.services.camera_db_helpers import (
     _resolve_local_path,
 )
 from app.services.alert_writer import alert_writer_loop, STOP_SENTINEL
+from app.controllers.feature_config_controller import get_camera_feature_config
+from app.controllers.dynamic_fps_controller import decide_camera_fps
 
 
 def _is_network_source(url) -> bool:
@@ -150,6 +152,15 @@ class CameraManager:
 
         # Build per-camera config list from DB; fall back to config.yaml if empty
         camera_configs = self._build_camera_configs(cfg)
+        if cfg.get("dynamic_fps", {}).get("enabled"):
+            dyn_settings = cfg.get("dynamic_fps", {})
+            for cam_cfg in camera_configs:
+                cam_cfg["ingestion_fps"] = decide_camera_fps(
+                    camera_count=len(camera_configs),
+                    camera_id=cam_cfg["id"],
+                    requested_fps=cam_cfg.get("ingestion_fps"),
+                    settings=dyn_settings,
+                )
 
         extra_models      = cfg.get("extra_models") or {}
 
@@ -238,6 +249,15 @@ class CameraManager:
             ingestion_fps    = cfg.get("ingestion_fps", 4)
             detection_width  = cfg.get("detection_frame_width", 640)
             detection_height = cfg.get("detection_frame_height", 480)
+
+        if cfg.get("dynamic_fps", {}).get("enabled"):
+            active_count = len(db_cams) if db_cams else max(1, len(cfg.get("camera_feeds", [])))
+            ingestion_fps = decide_camera_fps(
+                camera_count=active_count,
+                camera_id=cam_id,
+                requested_fps=ingestion_fps,
+                settings=cfg.get("dynamic_fps", {}),
+            )
 
         # Model config from DB
         model_cfg = load_model_config_for_camera(cam_id)
@@ -661,6 +681,7 @@ class CameraManager:
         assigned_buzzers  = fetch_buzzers_for_camera(cam_id)
         enabled_models    = fetch_enabled_models_for_camera(cam_id)
         burglar_alarm_cfg = fetch_burglar_config(cam_id)
+        feature_config    = get_camera_feature_config(cam_id)
 
         if cam_id not in self.result_queues:
             self.result_queues[cam_id] = self._mp_manager.Queue(maxsize=4)
@@ -714,6 +735,7 @@ class CameraManager:
                 safe_classes=safe_classes or self.safe_classes,
                 burglar_alarm_config=burglar_alarm_cfg,
                 burglar_test_sound=bool(burglar_test_sound),
+                feature_config=feature_config,
             ),
             daemon=True,
             name=f"ResultHandler-{cam_id}",

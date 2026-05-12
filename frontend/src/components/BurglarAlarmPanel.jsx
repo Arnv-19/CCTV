@@ -63,6 +63,7 @@ export default function BurglarAlarmPanel() {
   const [form,       setForm]       = useState(DEFAULT_FORM)
   const [rois,       setRois]       = useState([])
   const [status,     setStatus]     = useState(null)
+  const [verification, setVerification] = useState(null)
   const [saving,     setSaving]     = useState(false)
   const [deleting,   setDeleting]   = useState(false)
   const [loading,    setLoading]    = useState(true)
@@ -140,6 +141,15 @@ export default function BurglarAlarmPanel() {
     loadCamera(selectedCam)
   }, [selectedCam, loadCamera])
 
+  const loadVerification = async () => {
+    try {
+      setError(null)
+      setVerification(await api.verifyBurglarAlarmAllCameras())
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   const handleSave = async (e) => {
     e.preventDefault()
     setSaving(true)
@@ -195,6 +205,13 @@ export default function BurglarAlarmPanel() {
                 >
                   <RefreshCw size={14} />
                 </button>
+                <button
+                  onClick={loadVerification}
+                  className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+                  type="button"
+                >
+                  Verify all
+                </button>
               </div>
 
               {/* Loading indicator */}
@@ -243,6 +260,45 @@ export default function BurglarAlarmPanel() {
                       </select>
                       <StatusBadge status={status} />
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {verification && (
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-200">All-camera verification</p>
+                      <p className="text-xs text-slate-500">
+                        {verification.configured_count} / {verification.camera_count} configured
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded-full font-semibold ${
+                      verification.all_enabled ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'
+                    }`}>
+                      {verification.all_enabled ? 'All enabled' : 'Needs attention'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                    {verification.items.map(item => (
+                      <div key={item.camera_id} className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm text-slate-200">{item.camera_name || `Camera ${item.camera_id}`}</span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full ${
+                            item.active_now ? 'bg-red-900/50 text-red-300'
+                              : item.alarm_enabled ? 'bg-green-900/40 text-green-300'
+                              : 'bg-slate-700 text-slate-400'
+                          }`}>
+                            {!item.configured ? 'Missing' : item.alarm_enabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                        </div>
+                        {item.configured && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {item.alarm_start_time} - {item.alarm_end_time}
+                          </p>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

@@ -190,12 +190,20 @@ function CameraModels({ camId, canEdit }) {
 export default function ConfigPanel({ onSaved, systemMetrics }) {
   const { isAdmin } = useAuth()
   const [cfg,      setCfg]     = useState(null)
+  const [missingCfg, setMissingCfg] = useState(null)
+  const [crowdCfg, setCrowdCfg] = useState(null)
+  const [dynamicFpsCfg, setDynamicFpsCfg] = useState(null)
+  const [fpsRecommendations, setFpsRecommendations] = useState([])
   const [buzzers,  setBuzzers] = useState([])
   const [saving,   setSaving]  = useState(false)
   const [error,    setError]   = useState(null)
+  const [success,  setSuccess] = useState(null)
 
   useEffect(() => {
     api.getConfig().then(setCfg).catch(e => setError(e.message))
+    api.getMissingPersonConfig().then(setMissingCfg).catch(() => {})
+    api.getCrowdAlertConfig().then(setCrowdCfg).catch(() => {})
+    api.getDynamicFpsConfig().then(setDynamicFpsCfg).catch(() => {})
     api.getBuzzers().then(setBuzzers).catch(() => {})
   }, [])
 
@@ -228,11 +236,29 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
   const save = async () => {
     setSaving(true)
     setError(null)
+    setSuccess(null)
     try {
       await api.updateConfig(cfg)
+      if (missingCfg) await api.updateMissingPersonConfig(missingCfg)
+      if (crowdCfg) await api.updateCrowdAlertConfig(crowdCfg)
+      if (dynamicFpsCfg) await api.updateDynamicFpsConfig(dynamicFpsCfg)
+      setSuccess('Configuration saved. Restart detection for runtime changes.')
       onSaved?.()
     } catch (e) { setError(e.message) }
     finally { setSaving(false) }
+  }
+
+  const loadFpsRecommendations = async () => {
+    try {
+      setFpsRecommendations(await api.getDynamicFpsRecommendations(systemMetrics?.system?.cpu_percent))
+    } catch (e) { setError(e.message) }
+  }
+
+  const applyFpsRecommendations = async () => {
+    try {
+      setFpsRecommendations(await api.applyDynamicFps(systemMetrics?.system?.cpu_percent))
+      setSuccess('Dynamic FPS applied. Restart detection to use new FPS.')
+    } catch (e) { setError(e.message) }
   }
 
   if (!cfg) return (
@@ -252,6 +278,11 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
       {error && (
         <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
           {error}
+        </div>
+      )}
+      {success && (
+        <div className="bg-green-900/40 border border-green-700 text-green-300 rounded-lg px-4 py-3 text-sm">
+          {success}
         </div>
       )}
 
@@ -416,6 +447,85 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
                 <CameraBuzzers camId={i} allBuzzers={buzzers} />
               </div>
             ))}
+          </div>
+        </Section>
+      )}
+
+      {(missingCfg || crowdCfg || dynamicFpsCfg) && (
+        <Section title="Safety Automation">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            {missingCfg && (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-200">Missing person</span>
+                  <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={!!missingCfg.enabled} disabled={!isAdmin}
+                    onChange={e => setMissingCfg({ ...missingCfg, enabled: e.target.checked })} />
+                </label>
+                <Field label="Frames"><input className={inputCls} type="number" min="1" disabled={!isAdmin} value={missingCfg.missing_frames ?? 3600}
+                  onChange={e => setMissingCfg({ ...missingCfg, missing_frames: Number(e.target.value) })} /></Field>
+                <Field label="Cooldown"><input className={inputCls} type="number" min="0" disabled={!isAdmin} value={missingCfg.cooldown_sec ?? 300}
+                  onChange={e => setMissingCfg({ ...missingCfg, cooldown_sec: Number(e.target.value) })} /></Field>
+                <label className="flex items-center gap-2 text-sm text-slate-300">
+                  <input type="checkbox" className="w-4 h-4 accent-green-500" checked={!!missingCfg.send_whatsapp} disabled={!isAdmin}
+                    onChange={e => setMissingCfg({ ...missingCfg, send_whatsapp: e.target.checked })} />
+                  WhatsApp snapshot
+                </label>
+              </div>
+            )}
+
+            {crowdCfg && (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-200">Crowd alert</span>
+                  <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={!!crowdCfg.enabled} disabled={!isAdmin}
+                    onChange={e => setCrowdCfg({ ...crowdCfg, enabled: e.target.checked })} />
+                </label>
+                <Field label="People"><input className={inputCls} type="number" min="1" disabled={!isAdmin} value={crowdCfg.person_threshold ?? 5}
+                  onChange={e => setCrowdCfg({ ...crowdCfg, person_threshold: Number(e.target.value) })} /></Field>
+                <Field label="Seconds"><input className={inputCls} type="number" min="0" step="0.5" disabled={!isAdmin} value={crowdCfg.sustained_seconds ?? 5}
+                  onChange={e => setCrowdCfg({ ...crowdCfg, sustained_seconds: Number(e.target.value) })} /></Field>
+                <Field label="Cooldown"><input className={inputCls} type="number" min="0" disabled={!isAdmin} value={crowdCfg.cooldown_sec ?? 300}
+                  onChange={e => setCrowdCfg({ ...crowdCfg, cooldown_sec: Number(e.target.value) })} /></Field>
+                <label className="flex items-center gap-2 text-sm text-slate-300">
+                  <input type="checkbox" className="w-4 h-4 accent-green-500" checked={!!crowdCfg.send_whatsapp} disabled={!isAdmin}
+                    onChange={e => setCrowdCfg({ ...crowdCfg, send_whatsapp: e.target.checked })} />
+                  WhatsApp snapshot
+                </label>
+              </div>
+            )}
+
+            {dynamicFpsCfg && (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-200">Dynamic FPS</span>
+                  <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={!!dynamicFpsCfg.enabled} disabled={!isAdmin}
+                    onChange={e => setDynamicFpsCfg({ ...dynamicFpsCfg, enabled: e.target.checked })} />
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {['min_fps', 'max_fps', 'default_fps'].map(key => (
+                    <label key={key} className="space-y-1">
+                      <span className="text-xs text-slate-400">{key.replace('_fps', '')}</span>
+                      <input className={inputCls} type="number" min="1" disabled={!isAdmin} value={dynamicFpsCfg[key] ?? 4}
+                        onChange={e => setDynamicFpsCfg({ ...dynamicFpsCfg, [key]: Number(e.target.value) })} />
+                    </label>
+                  ))}
+                </div>
+                <Field label="CPU target"><input className={inputCls} type="number" min="1" max="100" disabled={!isAdmin}
+                  value={dynamicFpsCfg.target_cpu_percent ?? 70}
+                  onChange={e => setDynamicFpsCfg({ ...dynamicFpsCfg, target_cpu_percent: Number(e.target.value) })} /></Field>
+                <div className="flex gap-2">
+                  <button type="button" onClick={loadFpsRecommendations}
+                    className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold px-3 py-2 rounded-lg">Recommend</button>
+                  <button type="button" onClick={applyFpsRecommendations} disabled={!isAdmin}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50">Apply</button>
+                </div>
+                {fpsRecommendations.length > 0 && (
+                  <div className="text-xs text-slate-400 space-y-1">
+                    {fpsRecommendations.map(r => <div key={r.camera_id} className="flex justify-between"><span>Cam {r.camera_id}</span><span>{r.current_fps ?? '-'} → {r.recommended_fps} fps</span></div>)}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </Section>
       )}

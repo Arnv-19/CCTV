@@ -161,6 +161,18 @@ export default function ReportsPanel() {
     finally { setLoading(false) }
   }
 
+  const handleSnapshotWhatsApp = async (alert) => {
+    try {
+      setError(null)
+      setSuccess('')
+      await api.sendSnapshotWhatsApp({
+        snapshot_path: alert.snapshot_path,
+        caption: `AXIS CCTV SNAPSHOT | Cam ${alert.camera_id} | ${alert.violation_type}`,
+      })
+      setSuccess('Snapshot sent to WhatsApp successfully.')
+    } catch (e) { setError(e.message) }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return (
@@ -270,7 +282,7 @@ export default function ReportsPanel() {
                 <th className="px-4 py-3">Violation</th>
                 <th className="px-4 py-3">Conf</th>
                 <th className="px-4 py-3">Buzzer</th>
-                <th className="px-4 py-3 text-right">Ack</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700">
@@ -300,6 +312,13 @@ export default function ReportsPanel() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-3">
+                    {a.snapshot_path && (
+                      <button onClick={() => handleSnapshotWhatsApp(a)}
+                        className="text-xs text-green-400 hover:text-green-300 hover:underline">
+                        WhatsApp
+                      </button>
+                    )}
                     {a.acknowledged ? (
                       <span className="text-xs text-green-500 flex items-center justify-end gap-1">
                         <CheckCheck size={12} /> Done
@@ -310,6 +329,7 @@ export default function ReportsPanel() {
                         Acknowledge
                       </button>
                     )}
+                    </div>
                   </td>
                 </tr>
               ))}
