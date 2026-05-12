@@ -11,11 +11,13 @@ from .buzzer import Buzzer
 from .camera_buzzer import CameraBuzzer
 from .alert import Alert
 from .burglar_alarm_event import BurglarAlarmEvent
+from .app_config import AppConfig
 
 __all__ = [
     "Camera", "ROI", "BurglarAlarmConfig",
     "AIModel", "ModelClass", "CameraModelAssignment", "CameraClassConfig",
     "User", "PasswordResetToken",
     "Buzzer", "CameraBuzzer",
-    "Alert", "BurglarAlarmEvent"
+    "Alert", "BurglarAlarmEvent",
+    "AppConfig",
 ]
