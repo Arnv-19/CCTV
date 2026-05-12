@@ -96,4 +96,28 @@ def get_config() -> dict:
     # e.g. {"vehicle": "weights/vehicle_model.pt", "fire": "weights/fire_model.pt"}
     cfg.setdefault("extra_models", {})
 
+    # --- Safety feature flags ---
+    cfg.setdefault("missing_person_alert", {})
+    cfg["missing_person_alert"].setdefault("enabled", False)
+    cfg["missing_person_alert"].setdefault("missing_frames", 3600)
+    cfg["missing_person_alert"].setdefault("cooldown_sec", 300)
+    cfg["missing_person_alert"].setdefault("send_whatsapp", False)
+    cfg["missing_person_alert"].setdefault("per_camera", {})
+
+    cfg.setdefault("crowd_alert", {})
+    cfg["crowd_alert"].setdefault("enabled", False)
+    cfg["crowd_alert"].setdefault("person_threshold", 5)
+    cfg["crowd_alert"].setdefault("sustained_seconds", 5)
+    cfg["crowd_alert"].setdefault("cooldown_sec", 300)
+    cfg["crowd_alert"].setdefault("send_whatsapp", False)
+    cfg["crowd_alert"].setdefault("per_camera", {})
+
+    cfg.setdefault("dynamic_fps", {})
+    cfg["dynamic_fps"].setdefault("enabled", False)
+    cfg["dynamic_fps"].setdefault("min_fps", 2)
+    cfg["dynamic_fps"].setdefault("max_fps", 12)
+    cfg["dynamic_fps"].setdefault("default_fps", 4)
+    cfg["dynamic_fps"].setdefault("target_cpu_percent", 70)
+    cfg["dynamic_fps"].setdefault("per_camera", {})
+
     return cfg
