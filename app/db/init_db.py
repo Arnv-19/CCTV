@@ -78,6 +78,35 @@ def create_tables():
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS missing_person_alert JSONB"))
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS crowd_alert JSONB"))
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS dynamic_fps JSONB"))
+        # alerts.camera_id must be nullable so historical alerts are preserved when
+        # a camera is deleted (ON DELETE SET NULL). Drop NOT NULL if still present.
+        conn.execute(text("ALTER TABLE alerts ALTER COLUMN camera_id DROP NOT NULL"))
+        # Null out any alerts whose camera_id points to a non-existent camera
+        # (e.g. camera_id=0 or stale IDs) so the FK constraint can be added cleanly.
+        conn.execute(text(
+            "UPDATE alerts SET camera_id = NULL "
+            "WHERE camera_id IS NOT NULL "
+            "AND camera_id NOT IN (SELECT id FROM cameras)"
+        ))
+        conn.execute(text(
+            "DO $$ BEGIN "
+            "IF EXISTS ("
+            "  SELECT 1 FROM pg_constraint WHERE conname = 'alerts_camera_id_fkey'"
+            ") THEN "
+            "  ALTER TABLE alerts DROP CONSTRAINT alerts_camera_id_fkey; "
+            "END IF; "
+            "END $$;"
+        ))
+        conn.execute(text(
+            "DO $$ BEGIN "
+            "IF NOT EXISTS ("
+            "  SELECT 1 FROM pg_constraint WHERE conname = 'alerts_camera_id_fkey'"
+            ") THEN "
+            "  ALTER TABLE alerts ADD CONSTRAINT alerts_camera_id_fkey "
+            "  FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE SET NULL; "
+            "END IF; "
+            "END $$;"
+        ))
     print("[init_db] Tables created.")
 
 

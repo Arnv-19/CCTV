@@ -362,25 +362,35 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
       {/* Cameras */}
       <Section title="Camera Streams">
         <div className="space-y-2">
-          <div className="hidden sm:grid sm:grid-cols-[1fr_180px_36px] gap-2 text-xs text-slate-500 px-1">
+          <div className="hidden sm:grid sm:grid-cols-[1fr_160px_80px_36px] gap-2 text-xs text-slate-500 px-1">
             <span>RTSP / Stream URL</span>
             <span>Title</span>
+            <span>FPS</span>
             <span />
           </div>
           {cameras.map((camera, i) => (
-            <div key={camera.id ?? `draft-${i}`} className="flex flex-col sm:grid sm:grid-cols-[1fr_180px_36px] gap-2 sm:items-center rounded-lg sm:rounded-none bg-slate-700/20 sm:bg-transparent p-2 sm:p-0">
+            <div key={camera.id ?? `draft-${i}`} className="flex flex-col sm:grid sm:grid-cols-[1fr_160px_80px_36px] gap-2 sm:items-center rounded-lg sm:rounded-none bg-slate-700/20 sm:bg-transparent p-2 sm:p-0">
               <input
                 className={inputCls}
                 value={camera.stream_url || ''}
                 onChange={e => updateCamera(i, 'stream_url', e.target.value)}
                 placeholder="rtsp://..."
               />
+              <input
+                className={inputCls}
+                value={camera.name || ''}
+                onChange={e => updateCamera(i, 'name', e.target.value)}
+                placeholder={`Camera ${i + 1}`}
+              />
               <div className="flex gap-2 sm:contents">
                 <input
+                  type="number"
+                  min="1"
+                  max="30"
                   className={`${inputCls} flex-1`}
-                  value={camera.name || ''}
-                  onChange={e => updateCamera(i, 'name', e.target.value)}
-                  placeholder={`Camera ${i + 1}`}
+                  value={camera.ingestion_fps ?? 4}
+                  onChange={e => updateCamera(i, 'ingestion_fps', parseInt(e.target.value) || 1)}
+                  title="Frames per second ingested from stream"
                 />
                 <button
                   onClick={() => removeCamera(i)}
@@ -544,6 +554,7 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
               </div>
             )}
 
+            {/* Dynamic FPS — uncomment when required
             {dynamicFpsCfg && (
               <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
                 <label className="flex items-center justify-between gap-3">
@@ -576,6 +587,7 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
                 )}
               </div>
             )}
+            */}
           </div>
         </Section>
       )}
