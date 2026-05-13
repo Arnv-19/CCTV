@@ -46,7 +46,38 @@ def create_tables():
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(32)"))
         conn.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS session_tracker_id VARCHAR(36)"))
+        conn.execute(text("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS used_at TIMESTAMP"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_alerts_session_tracker_id ON alerts (session_tracker_id)"))
+        # Older ROI module versions created rois.camera_id as VARCHAR. The app
+        # now uses cameras.id (INTEGER) as the source of truth, so convert the
+        # column and discard orphan/non-numeric legacy ROI rows before adding FK.
+        conn.execute(text("DELETE FROM rois WHERE camera_id::text !~ '^[0-9]+$'"))
+        conn.execute(text(
+            "DELETE FROM rois "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM cameras WHERE cameras.id = rois.camera_id::integer"
+            ")"
+        ))
+        conn.execute(text("ALTER TABLE rois DROP CONSTRAINT IF EXISTS rois_camera_id_fkey"))
+        conn.execute(text(
+            "ALTER TABLE rois "
+            "ALTER COLUMN camera_id TYPE INTEGER USING camera_id::integer"
+        ))
+        conn.execute(text("ALTER TABLE rois ALTER COLUMN camera_id SET NOT NULL"))
+        conn.execute(text(
+            "DO $$ BEGIN "
+            "IF NOT EXISTS ("
+            "  SELECT 1 FROM pg_constraint WHERE conname = 'rois_camera_id_fkey'"
+            ") THEN "
+            "  ALTER TABLE rois ADD CONSTRAINT rois_camera_id_fkey "
+            "  FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE; "
+            "END IF; "
+            "END $$;"
+        ))
+        # Feature config columns migrated from config.yaml to DB
+        conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS missing_person_alert JSONB"))
+        conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS crowd_alert JSONB"))
+        conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS dynamic_fps JSONB"))
     print("[init_db] Tables created.")
 
 

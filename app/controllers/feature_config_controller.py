@@ -3,10 +3,11 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from app.config import get_config, load_config, save_config
+from app.db.database import SessionLocal
+from app.db.models.app_config import AppConfig
 
 
-FEATURE_DEFAULTS = {
+FEATURE_DEFAULTS: dict[str, dict] = {
     "missing_person_alert": {
         "enabled": False,
         "missing_frames": 3600,
@@ -45,21 +46,41 @@ def _deep_merge(base: dict, override: dict | None) -> dict:
     return result
 
 
+def _get_or_create_app_config(db) -> AppConfig:
+    row = db.query(AppConfig).filter(AppConfig.id == 1).first()
+    if row is None:
+        row = AppConfig(id=1)
+        db.add(row)
+        db.flush()
+    return row
+
+
 def get_feature_section(section: str) -> dict:
     if section not in FEATURE_DEFAULTS:
         raise KeyError(f"Unknown feature section: {section}")
-    cfg = get_config()
-    return _deep_merge(FEATURE_DEFAULTS[section], cfg.get(section))
+    db = SessionLocal()
+    try:
+        row = _get_or_create_app_config(db)
+        stored = getattr(row, section, None)
+        return _deep_merge(FEATURE_DEFAULTS[section], stored)
+    finally:
+        db.close()
 
 
 def update_feature_section(section: str, data: dict[str, Any]) -> dict:
     if section not in FEATURE_DEFAULTS:
         raise KeyError(f"Unknown feature section: {section}")
-    cfg = load_config()
-    current = _deep_merge(FEATURE_DEFAULTS[section], cfg.get(section))
-    cfg[section] = _deep_merge(current, data)
-    save_config(cfg)
-    return get_feature_section(section)
+    db = SessionLocal()
+    try:
+        row = _get_or_create_app_config(db)
+        current = _deep_merge(FEATURE_DEFAULTS[section], getattr(row, section, None))
+        merged = _deep_merge(current, data)
+        setattr(row, section, merged)
+        db.commit()
+        db.refresh(row)
+        return _deep_merge(FEATURE_DEFAULTS[section], getattr(row, section, None))
+    finally:
+        db.close()
 
 
 def get_camera_feature_config(cam_id: int) -> dict:
@@ -72,4 +93,3 @@ def get_camera_feature_config(cam_id: int) -> dict:
         merged.pop("per_camera", None)
         result[section] = merged
     return result
-

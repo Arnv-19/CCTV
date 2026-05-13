@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.database import Base
 
@@ -23,5 +24,11 @@ class AppConfig(Base):
     use_wifi = Column(Boolean, default=False, nullable=False)
     alarm_transport = Column(String(32), nullable=True)
     alarm_http_token = Column(String(255), default="", nullable=False)
+
+    # Feature configs — stored as JSONB so schema is flexible
+    missing_person_alert = Column(JSONB, nullable=True)
+    crowd_alert = Column(JSONB, nullable=True)
+    dynamic_fps = Column(JSONB, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

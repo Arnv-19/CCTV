@@ -11,5 +11,7 @@ class PasswordResetToken(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     token_hash = Column(String(128), unique=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
     
     user = relationship("User", back_populates="password_reset_tokens")

@@ -52,12 +52,24 @@ def _validate_points(points: List[PointNorm]) -> None:
         raise HTTPException(422, f"Invalid polygon: {reason}")
 
 
-def _check_limit(db: Session, camera_id: str) -> None:
-    count = db.query(ROI).filter(ROI.camera_id == camera_id).count()
+def _camera_id_int(camera_id: int | str) -> int:
+    try:
+        return int(camera_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "camera_id must be numeric") from exc
+
+
+def _camera_cache_key(camera_id: int | str) -> str:
+    return str(_camera_id_int(camera_id))
+
+
+def _check_limit(db: Session, camera_id: int | str) -> None:
+    cam_id = _camera_id_int(camera_id)
+    count = db.query(ROI).filter(ROI.camera_id == cam_id).count()
     if count >= roi_config.max_rois_per_camera:
         raise HTTPException(
             409,
-            f"Camera '{camera_id}' already has {roi_config.max_rois_per_camera} ROIs (limit reached)"
+            f"Camera '{cam_id}' already has {roi_config.max_rois_per_camera} ROIs (limit reached)"
         )
 
 
@@ -67,33 +79,35 @@ def _check_limit(db: Session, camera_id: str) -> None:
 
 @router.get("/camera/{camera_id}")
 def list_camera_rois(
-    camera_id: str,
+    camera_id: int,
     active_only: bool = Query(False),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """List all ROIs for a camera."""
-    q = db.query(ROI).filter(ROI.camera_id == camera_id)
+    cam_id = _camera_id_int(camera_id)
+    q = db.query(ROI).filter(ROI.camera_id == cam_id)
     if active_only:
         q = q.filter(ROI.is_active.is_(True))
     rois = q.order_by(ROI.priority.desc(), ROI.created_at).all()
-    return {"camera_id": camera_id, "rois": [r.to_dict() for r in rois], "total": len(rois)}
+    return {"camera_id": cam_id, "rois": [r.to_dict() for r in rois], "total": len(rois)}
 
 
 @router.post("/camera/{camera_id}", status_code=status.HTTP_201_CREATED)
 def create_roi(
-    camera_id: str,
+    camera_id: int,
     body: ROIBody,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Create a new ROI for a camera."""
+    cam_id = _camera_id_int(camera_id)
     _check_limit(db, camera_id)
     _validate_points(body.points_normalized)
 
     roi = ROI(
         roi_id=str(uuid.uuid4()),
-        camera_id=camera_id,
+        camera_id=cam_id,
         name=body.name,
         points_normalized=[{"x": p.x, "y": p.y} for p in body.points_normalized],
         is_active=body.is_active,
@@ -108,8 +122,8 @@ def create_roi(
     db.add(roi)
     db.commit()
     db.refresh(roi)
-    get_roi_cache().invalidate(camera_id)
-    logger.info("ROI created roi_id=%s camera_id=%s by=%s", roi.roi_id, camera_id, current_user.username)
+    get_roi_cache().invalidate(str(cam_id))
+    logger.info("ROI created roi_id=%s camera_id=%s by=%s", roi.roi_id, cam_id, current_user.username)
     return roi.to_dict()
 
 
@@ -152,7 +166,7 @@ def update_roi(
     roi.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(roi)
-    get_roi_cache().invalidate(roi.camera_id)
+    get_roi_cache().invalidate(str(roi.camera_id))
     logger.info("ROI updated roi_id=%s", roi_id)
     return roi.to_dict()
 
@@ -168,7 +182,7 @@ def delete_roi(
     camera_id = roi.camera_id
     db.delete(roi)
     db.commit()
-    get_roi_cache().invalidate(camera_id)
+    get_roi_cache().invalidate(str(camera_id))
     logger.info("ROI deleted roi_id=%s camera_id=%s", roi_id, camera_id)
 
 
@@ -184,19 +198,20 @@ def toggle_roi(
     roi.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(roi)
-    get_roi_cache().invalidate(roi.camera_id)
+    get_roi_cache().invalidate(str(roi.camera_id))
     logger.info("ROI toggled roi_id=%s is_active=%s", roi_id, roi.is_active)
     return roi.to_dict()
 
 
 @router.put("/camera/{camera_id}/bulk")
 def bulk_replace_rois(
-    camera_id: str,
+    camera_id: int,
     body: BulkBody,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Atomically replace ALL ROIs for a camera."""
+    cam_id = _camera_id_int(camera_id)
     if len(body.rois) > roi_config.max_rois_per_camera:
         raise HTTPException(
             409,
@@ -207,13 +222,13 @@ def bulk_replace_rois(
         if not ok:
             raise HTTPException(422, f"ROI #{i} '{r.name}': {reason}")
 
-    db.query(ROI).filter(ROI.camera_id == camera_id).delete()
+    db.query(ROI).filter(ROI.camera_id == cam_id).delete()
     now = datetime.utcnow()
     new_rois = []
     for r in body.rois:
         roi = ROI(
             roi_id=str(uuid.uuid4()),
-            camera_id=camera_id,
+            camera_id=cam_id,
             name=r.name,
             points_normalized=[{"x": p.x, "y": p.y} for p in r.points_normalized],
             is_active=r.is_active,
@@ -232,6 +247,6 @@ def bulk_replace_rois(
     for roi in new_rois:
         db.refresh(roi)
 
-    get_roi_cache().invalidate(camera_id)
-    logger.info("Bulk replaced %d ROIs for camera_id=%s", len(new_rois), camera_id)
-    return {"camera_id": camera_id, "rois": [r.to_dict() for r in new_rois], "total": len(new_rois)}
+    get_roi_cache().invalidate(str(cam_id))
+    logger.info("Bulk replaced %d ROIs for camera_id=%s", len(new_rois), cam_id)
+    return {"camera_id": cam_id, "rois": [r.to_dict() for r in new_rois], "total": len(new_rois)}
