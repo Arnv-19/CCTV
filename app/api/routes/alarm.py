@@ -1,23 +1,40 @@
 import sys
 from pathlib import Path
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 import alarm  # import module, not names, so runtime state (ser) is always current
-from app.config import get_config
+
+from app.db.database import get_db
+from app.db.models.app_config import AppConfig
+from app.config import get_config  # kept for MQTT settings not yet in DB
 
 router = APIRouter()
 
 
+def _get_app_config(db: Session) -> AppConfig | None:
+    return db.query(AppConfig).filter(AppConfig.id == 1).first()
+
+
 @router.post("/test")
-def test_alarm():
+def test_alarm(db: Session = Depends(get_db)):
+    row = _get_app_config(db)
+
+    # Core alarm settings from DB
+    use_wifi       = row.use_wifi       if row else False
+    esp_ip         = row.esp_ip         if row else ""
+    alarm_http_token = row.alarm_http_token if row else ""
+    transport      = row.alarm_transport if row else None
+
+    # MQTT settings not yet in DB — fall back to config.yaml
     cfg = get_config()
     alarm.send_buzzer_command(
         True,
-        cfg.get("use_wifi", False),
-        esp_ip=cfg.get("esp_ip", None),
-        token=cfg.get("alarm_http_token", ""),
-        transport=cfg.get("alarm_transport", None),
+        use_wifi,
+        esp_ip=esp_ip or None,
+        token=alarm_http_token,
+        transport=transport,
         mqtt_broker=cfg.get("mqtt_broker", ""),
         mqtt_port=cfg.get("mqtt_port", 1883),
         mqtt_username=cfg.get("mqtt_username", ""),
@@ -32,17 +49,25 @@ def test_alarm():
 
 
 @router.get("/status")
-def alarm_status():
+def alarm_status(db: Session = Depends(get_db)):
+    row = _get_app_config(db)
+
+    use_wifi  = row.use_wifi        if row else False
+    esp_ip    = row.esp_ip          if row else ""
+    transport = row.alarm_transport if row else None
+
+    # MQTT settings not yet in DB — fall back to config.yaml
     cfg = get_config()
-    # Reference alarm.ser at call time (not import time) so we see the live value
+
     serial_connected = alarm.ser is not None and alarm.ser.is_open
-    transport = cfg.get("alarm_transport") or ("http" if cfg.get("use_wifi") else "usb")
+    effective_transport = transport or ("http" if use_wifi else "usb")
+
     return {
-        "transport": transport,
-        "serial_port": alarm.SERIAL_PORT,
+        "transport":       effective_transport,
+        "serial_port":     alarm.SERIAL_PORT,
         "serial_connected": serial_connected,
-        "use_wifi": cfg.get("use_wifi", False),
-        "esp_ip": cfg.get("esp_ip", ""),
-        "mqtt_broker": cfg.get("mqtt_broker", ""),
-        "mqtt_topic": cfg.get("mqtt_topic", "skycctv/alarm"),
+        "use_wifi":        use_wifi,
+        "esp_ip":          esp_ip,
+        "mqtt_broker":     cfg.get("mqtt_broker", ""),
+        "mqtt_topic":      cfg.get("mqtt_topic", "skycctv/alarm"),
     }

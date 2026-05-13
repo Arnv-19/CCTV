@@ -15,7 +15,7 @@ from app.db.database import get_db
 from app.db.models import PasswordResetToken, User
 from app.dependencies import get_current_user, require_admin
 from app.services.auth_service import create_access_token, hash_password, verify_password
-from app.schemas.user_schema import (ForgotPasswordRequest, GenericMessage, LoginRequest, RegisterRequest, ResetPasswordRequest, UserCreate, UserUpdate, AuthTokenResponse, _user_dict, _norm_email, _norm_phone, _derive_username,PasswordReset)
+from app.schemas.user_schema import (_GENERIC_FORGOT_MSG, ForgotPasswordRequest, GenericMessage, LoginRequest, RegisterRequest, ResetPasswordRequest, UserCreate, UserUpdate, AuthTokenResponse, _user_dict, _norm_email, _norm_phone, _derive_username,PasswordReset)
 router = APIRouter()
 
 @router.post("/register", status_code=status.HTTP_201_CREATED, response_model=GenericMessage)
@@ -69,12 +69,14 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
         raw_token = secrets.token_urlsafe(48)
         token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+        created_at = datetime.now(timezone.utc)
 
         db.add(
             PasswordResetToken(
                 user_id=user.id,
                 token_hash=token_hash,
                 expires_at=expires_at,
+                created_at=created_at,
             )
         )
         db.commit()

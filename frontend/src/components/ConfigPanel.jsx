@@ -235,7 +235,16 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
     }))
   }
 
-  const removeCamera = (i) => {
+  const removeCamera = async (i) => {
+    const cam = (cfg.cameras || [])[i]
+    if (cam.id != null) {
+      try {
+        await api.deleteCamera(cam.id)
+      } catch (e) {
+        setError(`Failed to delete camera: ${e.message}`)
+        return
+      }
+    }
     setCfg(prev => ({
       ...prev,
       cameras: (prev.cameras || []).filter((_, idx) => idx !== i),
@@ -247,8 +256,38 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
     setError(null)
     setSuccess(null)
     try {
-      const response = await api.updateConfig(cfg)
-      setCfg(response.config)
+      // Save non-camera settings first so model rows exist in DB before assignment creation
+      const { cameras: _c, camera_feeds: _f, camera_titles: _t, ...settingsOnly } = cfg
+      await api.updateConfig(settingsOnly)
+
+      // Save each camera via its dedicated endpoint (assignments are created server-side)
+      for (const cam of (cfg.cameras || [])) {
+        if (cam.id == null) {
+          await api.addCamera({
+            name: cam.name,
+            stream_url: cam.stream_url,
+            location: cam.location,
+            is_active: cam.is_active ?? true,
+            ingestion_fps: cam.ingestion_fps ?? 4,
+            detection_width: cam.detection_width ?? 960,
+            detection_height: cam.detection_height ?? 720,
+          })
+        } else {
+          await api.updateCamera(cam.id, {
+            name: cam.name,
+            stream_url: cam.stream_url,
+            location: cam.location,
+            is_active: cam.is_active,
+            ingestion_fps: cam.ingestion_fps,
+            detection_width: cam.detection_width,
+            detection_height: cam.detection_height,
+          })
+        }
+      }
+
+      // Reload config to get fresh camera list with correct IDs for new cameras
+      const freshCfg = await api.getConfig()
+      setCfg(freshCfg)
       onSaved?.()
     } catch (e) { setError(e.message) }
     finally { setSaving(false) }

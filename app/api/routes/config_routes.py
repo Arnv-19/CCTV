@@ -18,6 +18,7 @@ from app.config import get_config
 from app.db.database import get_db
 from app.db.models import AIModel, AppConfig, Camera
 from app.schemas.config_schemas import ConfigPageCamera, ConfigUpdate
+from app.api.routes.cameras import _assign_all_active_models
 
 router = APIRouter()
 
@@ -227,6 +228,7 @@ def update_config(body: ConfigUpdate, db: Session = Depends(get_db)):
     seen_ids: set[int] = set()
 
     cameras = _normalize_cameras(body)
+    new_camera_ids: list[int] = []
     if body.cameras is not None or body.camera_feeds is not None or body.camera_titles is not None:
         for index, cam_body in enumerate(cameras, start=1):
             raw_name = (cam_body.name or "").strip()
@@ -244,7 +246,8 @@ def update_config(body: ConfigUpdate, db: Session = Depends(get_db)):
 
             name = raw_name or f"Camera {index}"
 
-            if cam_body.id is not None:
+            is_new = cam_body.id is None
+            if not is_new:
                 cam = existing_by_id.get(cam_body.id)
                 if cam is None:
                     raise HTTPException(404, f"Camera {cam_body.id} not found")
@@ -261,6 +264,8 @@ def update_config(body: ConfigUpdate, db: Session = Depends(get_db)):
             cam.detection_height = cam_body.detection_height
             db.flush()
             seen_ids.add(cam.id)
+            if is_new:
+                new_camera_ids.append(cam.id)
 
         for cam_id, cam in existing_by_id.items():
             if cam_id not in seen_ids:
@@ -268,6 +273,11 @@ def update_config(body: ConfigUpdate, db: Session = Depends(get_db)):
 
     for slot_key in MODEL_SLOT_SPECS:
         _upsert_model_slot(db, slot_key, getattr(body, slot_key), body.confidence_threshold)
+
+    if new_camera_ids:
+        db.flush()  # ensure model rows have IDs before assigning
+        for cam_id in new_camera_ids:
+            _assign_all_active_models(db, cam_id)
 
     if body.confidence_threshold is not None:
         app_cfg.confidence_threshold = body.confidence_threshold

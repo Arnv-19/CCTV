@@ -19,14 +19,55 @@ Endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.db.database import get_db
-from app.db.models import Camera
+from app.db.models import Camera, AIModel, CameraModelAssignment, CameraClassConfig
+from app.db.models.camera_model import CameraModel
 from app.services.camera_manager import camera_manager
 from app.schemas.cameras_schema import CameraCreate, CameraUpdate
+
 router = APIRouter()
+
+_KNOWN_MODEL_TYPES = [
+    "helmet_detection", "gloves_detection", "vest_detection",
+    "fire_detection", "glasses_detection", "mask_detection",
+]
+
+
+def _assign_all_active_models(db: Session, cam_id: int) -> None:
+    """
+    For a newly created camera:
+      1. Create CameraModelAssignment + CameraClassConfig rows for every active AI model
+         (controls which weights are loaded and which classes are active).
+      2. Create CameraModel rows for every known model type, all enabled by default
+         (controls the result-handler filter and is visible/toggleable in the UI).
+    """
+    # 1 — model weight assignments
+    active_models = db.query(AIModel).filter(AIModel.is_active == True).all()
+    for model in active_models:
+        already = db.query(CameraModelAssignment).filter(
+            CameraModelAssignment.camera_id == cam_id,
+            CameraModelAssignment.model_id == model.id,
+        ).first()
+        if already:
+            continue
+        asgn = CameraModelAssignment(camera_id=cam_id, model_id=model.id, is_enabled=True)
+        db.add(asgn)
+        db.flush()
+        for mc in model.classes:
+            db.add(CameraClassConfig(assignment_id=asgn.id, class_id=mc.id, is_active=True))
+
+    # 2 — explicit per-model-type toggles (so UI shows them and they can be toggled)
+    for model_type in _KNOWN_MODEL_TYPES:
+        already = db.query(CameraModel).filter(
+            CameraModel.camera_id == cam_id,
+            CameraModel.model_name == model_type,
+        ).first()
+        if not already:
+            db.add(CameraModel(camera_id=cam_id, model_name=model_type, is_enabled=True))
 
 
 
@@ -46,31 +87,45 @@ def camera_metrics():
 @router.post("/")
 def add_camera(body: CameraCreate, db: Session = Depends(get_db)):
     """Insert a new camera row into the database."""
-    cam = Camera(
-        name=body.name,
-        stream_url=body.stream_url,
-        location=body.location,
-        is_active=body.is_active,
-        ingestion_fps=body.ingestion_fps,
-        detection_width=body.detection_width,
-        detection_height=body.detection_height,
-    )
-    db.add(cam)
-    db.commit()
-    db.refresh(cam)
-    return {"message": "Camera added", "id": cam.id}
+    try:
+        # Clear any aborted transaction state inherited from the connection pool.
+        db.rollback()
+        cam = Camera(
+            name=body.name,
+            stream_url=body.stream_url,
+            location=body.location,
+            is_active=body.is_active,
+            ingestion_fps=body.ingestion_fps,
+            detection_width=body.detection_width,
+            detection_height=body.detection_height,
+        )
+        db.add(cam)
+        db.flush()
+        _assign_all_active_models(db, cam.id)
+        db.commit()
+        db.refresh(cam)
+        return {"message": "Camera added", "id": cam.id}
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(500, f"Could not add camera: {exc.orig or exc}") from exc
 
 
 @router.put("/{cam_id}")
 def update_camera(cam_id: int, body: CameraUpdate, db: Session = Depends(get_db)):
     """Update any fields of an existing camera."""
-    cam = db.query(Camera).filter(Camera.id == cam_id).first()
-    if not cam:
-        raise HTTPException(404, "Camera not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(cam, field, value)
-    db.commit()
-    return {"message": "Camera updated"}
+    try:
+        cam = db.query(Camera).filter(Camera.id == cam_id).first()
+        if not cam:
+            raise HTTPException(404, "Camera not found")
+        for field, value in body.model_dump(exclude_unset=True).items():
+            setattr(cam, field, value)
+        db.commit()
+        return {"message": "Camera updated"}
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(500, f"Could not update camera: {exc.orig or exc}") from exc
 
 
 @router.delete("/{cam_id}")
@@ -89,9 +144,13 @@ def delete_camera(cam_id: int, db: Session = Depends(get_db)):
             camera_manager.stop_camera(cam_id)
         except Exception:
             pass
-    db.delete(cam)
-    db.commit()
-    return {"message": "Camera deleted"}
+    try:
+        db.delete(cam)
+        db.commit()
+        return {"message": "Camera deleted"}
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(500, f"Could not delete camera: {exc.orig or exc}") from exc
 
 
 @router.post("/start")

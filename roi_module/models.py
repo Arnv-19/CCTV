@@ -36,7 +36,7 @@ class ROI(ROIBase):
     roi_id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    camera_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    camera_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Polygon stored as [{x: 0.1, y: 0.2}, ...]  — always normalized [0, 1]
