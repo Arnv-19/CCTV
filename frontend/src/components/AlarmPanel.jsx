@@ -3,7 +3,7 @@ import { Bell, BellOff, Usb, Wifi, Radio } from 'lucide-react'
 import { api } from '../api/client'
 
 const TRANSPORT_META = {
-  usb:  { label: 'USB Serial',  Icon: Usb,   color: 'text-blue-400' },
+  usb:  { label: 'USB Serial',  Icon: Usb,   color: 'text-emerald-400' },
   http: { label: 'WiFi / HTTP', Icon: Wifi,  color: 'text-green-400' },
   mqtt: { label: 'MQTT',        Icon: Radio, color: 'text-purple-400' },
 }
@@ -41,11 +41,11 @@ export default function AlarmPanel({ onTest }) {
   return (
     <div className="flex items-start justify-center h-full p-8">
       <div className="w-full max-w-md space-y-5">
-        <h2 className="text-lg font-semibold text-slate-200">Alarm Control</h2>
+        <h2 className="text-lg font-semibold text-zinc-200">Alarm Control</h2>
 
         {status && (
-          <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 space-y-3">
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Status</h3>
+          <div className="bg-zinc-800 rounded-xl border border-zinc-700 p-5 space-y-3">
+            <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Status</h3>
 
             <div className="flex items-center justify-between">
               <div className={`flex items-center gap-2 text-sm font-medium ${meta.color}`}>
@@ -59,7 +59,7 @@ export default function AlarmPanel({ onTest }) {
               </span>
             </div>
 
-            <div className="text-xs text-slate-500 space-y-1">
+            <div className="text-xs text-zinc-500 space-y-1">
               {transport === 'usb' && (
                 <p>Port: {status.serial_port} — {status.serial_connected ? 'connected' : 'disconnected'}</p>
               )}
@@ -87,7 +87,7 @@ export default function AlarmPanel({ onTest }) {
           {testing ? 'Triggering...' : 'Test Alarm'}
         </button>
 
-        <p className="text-xs text-slate-500 text-center">
+        <p className="text-xs text-zinc-500 text-center">
           Sends a one-time signal via the configured transport to confirm the alarm is wired correctly.
         </p>
       </div>

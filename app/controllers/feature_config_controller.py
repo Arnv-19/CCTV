@@ -11,7 +11,6 @@ FEATURE_DEFAULTS: dict[str, dict] = {
     "missing_person_alert": {
         "enabled": False,
         "missing_frames": 3600,
-        "cooldown_sec": 300,
         "send_whatsapp": False,
         "per_camera": {},
     },
@@ -19,7 +18,6 @@ FEATURE_DEFAULTS: dict[str, dict] = {
         "enabled": False,
         "person_threshold": 5,
         "sustained_seconds": 5,
-        "cooldown_sec": 300,
         "send_whatsapp": False,
         "per_camera": {},
     },

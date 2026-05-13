@@ -34,6 +34,7 @@ router = APIRouter()
 _KNOWN_MODEL_TYPES = [
     "helmet_detection", "gloves_detection", "vest_detection",
     "fire_detection", "glasses_detection", "mask_detection",
+    "vehicle_detection",
 ]
 
 

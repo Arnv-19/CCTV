@@ -537,9 +537,7 @@ def result_handler_worker(
     missing_person_cfg = feature_config.get("missing_person_alert") or {}
     crowd_alert_cfg = feature_config.get("crowd_alert") or {}
     missing_person_frames = 0
-    last_missing_person_alert_time = 0.0
     crowd_threshold_started_at = None
-    last_crowd_alert_time = 0.0
 
     ba_tracker           = None
     ba_tracking          = False
@@ -822,12 +820,7 @@ def result_handler_worker(
                 missing_person_frames = 0
 
             missing_threshold = int(missing_person_cfg.get("missing_frames", 3600))
-            missing_cooldown = max(0.0, float(missing_person_cfg.get("cooldown_sec", 300)))
-            now_alert = time.time()
-            if (
-                missing_person_frames >= missing_threshold
-                and now_alert - last_missing_person_alert_time >= missing_cooldown
-            ):
+            if missing_person_frames >= missing_threshold:
                 record_system_alert(
                     model_name="missing_person",
                     violation_type="missing_person",
@@ -835,21 +828,17 @@ def result_handler_worker(
                     send_whatsapp=bool(missing_person_cfg.get("send_whatsapp")),
                     fire_alarm=False,
                 )
-                last_missing_person_alert_time = now_alert
+                missing_person_frames = 0
 
         # ── Crowd alert: threshold must remain exceeded for N seconds ─────
         if crowd_alert_cfg.get("enabled"):
             crowd_threshold = int(crowd_alert_cfg.get("person_threshold", 5))
             sustained_sec = max(0.0, float(crowd_alert_cfg.get("sustained_seconds", 5)))
-            crowd_cooldown = max(0.0, float(crowd_alert_cfg.get("cooldown_sec", 300)))
             now_alert = time.time()
             if person_count >= crowd_threshold:
                 if crowd_threshold_started_at is None:
                     crowd_threshold_started_at = now_alert
-                if (
-                    now_alert - crowd_threshold_started_at >= sustained_sec
-                    and now_alert - last_crowd_alert_time >= crowd_cooldown
-                ):
+                if now_alert - crowd_threshold_started_at >= sustained_sec:
                     record_system_alert(
                         model_name="crowd_alert",
                         violation_type="crowd_threshold_exceeded",
@@ -857,7 +846,7 @@ def result_handler_worker(
                         send_whatsapp=bool(crowd_alert_cfg.get("send_whatsapp")),
                         fire_alarm=True,
                     )
-                    last_crowd_alert_time = now_alert
+                    crowd_threshold_started_at = None
             else:
                 crowd_threshold_started_at = None
 

@@ -27,7 +27,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI, fi
   const statusColor =
     camera.status === 'running' ? 'bg-green-500' :
     camera.status === 'error'   ? 'bg-red-500' :
-    'bg-slate-500'
+    'bg-zinc-500'
 
   const cameraReady = camera.status === 'running'
   const shouldMountStream = running && cameraReady && !imgError
@@ -36,7 +36,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI, fi
     : 'relative bg-black aspect-video overflow-hidden'
 
   return (
-    <div className="relative min-h-0 bg-slate-800 rounded-lg overflow-hidden border border-slate-700 flex flex-col">
+    <div className="relative min-h-0 bg-zinc-800 rounded-lg overflow-hidden border border-zinc-700 flex flex-col">
       {/* Stream */}
       <div className={streamClass}>
         {shouldMountStream ? (
@@ -54,7 +54,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI, fi
               }}
             />
             {!imgLoaded && (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-500">
+              <div className="absolute inset-0 flex items-center justify-center text-zinc-500">
                 <div className="text-center">
                   <Tv size={36} className="mx-auto mb-2 opacity-30" />
                   <p className="text-xs">Connecting stream...</p>
@@ -63,7 +63,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI, fi
             )}
           </>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-slate-600">
+          <div className="absolute inset-0 flex items-center justify-center text-zinc-600">
             <div className="text-center">
               <Tv size={36} className="mx-auto mb-2 opacity-30" />
               <p className="text-xs">
@@ -83,13 +83,13 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI, fi
       </div>
 
       {/* Footer */}
-      <div className="shrink-0 px-3 py-1.5 bg-slate-800 border-t border-slate-700 text-xs">
+      <div className="shrink-0 px-3 py-1.5 bg-zinc-800 border-t border-zinc-700 text-xs">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
-            <span className="font-semibold text-slate-200 truncate">{camera.title}</span>
+            <span className="font-semibold text-zinc-200 truncate">{camera.title}</span>
           </div>
-          <div className="flex items-center gap-3 text-slate-400 shrink-0">
+          <div className="flex items-center gap-3 text-zinc-400 shrink-0">
             {fallbacks.model_fallback && (
               <span className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-300 text-[10px] font-semibold">
                 model fallback
@@ -110,7 +110,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI, fi
             <button
               onClick={() => onEditROI?.(camera.id)}
               title="Edit ROI zones"
-              className="p-1 text-slate-500 hover:text-blue-400 hover:bg-slate-700 rounded transition-colors"
+              className="p-1 text-zinc-500 hover:text-emerald-400 hover:bg-zinc-700 rounded transition-colors"
             >
               <Crop size={13} />
             </button>
@@ -118,7 +118,7 @@ export default function CameraCard({ camera, running, streamEpoch, onEditROI, fi
         </div>
 
         {resources && (
-          <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-400">
+          <div className="mt-1 flex items-center gap-3 text-[11px] text-zinc-400">
             <span>CPU {resources.thread_cpu_percent_single_core}% of one core</span>
           </div>
         )}

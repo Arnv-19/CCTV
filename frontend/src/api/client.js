@@ -193,6 +193,16 @@ export const api = {
   verifyBurglarAlarmAllCameras: ()      => req('GET',    '/burglar-alarm/verify/all-cameras'),
 
 
+  // ── AI Model registry ─────────────────────────────────────────────────
+  getAiModels:    ()        => req('GET',    '/ai-models/'),
+  createAiModel:  (body)    => req('POST',   '/ai-models/', body),
+  updateAiModel:  (id, body)=> req('PUT',    `/ai-models/${id}`, body),
+  deleteAiModel:  (id)      => req('DELETE', `/ai-models/${id}`),
+
+  // ── Server file browser ───────────────────────────────────────────────
+  browseFiles: (dir = '') =>
+    req('GET', `/files/browse${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`),
+
   // ── Logs ──────────────────────────────────────────────────────────────
   getLogs:   (lines = 100) => req('GET', `/logs/?lines=${lines}`),
   clearLogs: () => req('DELETE', '/logs/'),

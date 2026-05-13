@@ -17,8 +17,8 @@ import { api } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 
 const inputCls =
-  'w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm ' +
-  'text-slate-100 focus:outline-none focus:border-blue-500'
+  'w-full bg-zinc-700 border border-zinc-600 rounded-lg px-3 py-2 text-sm ' +
+  'text-zinc-100 focus:outline-none focus:border-emerald-500'
 
 const DEFAULT_FORM = {
   alarm_enabled:    true,
@@ -32,14 +32,14 @@ function StatusBadge({ status }) {
   if (!status) return null
   if (!status.configured) {
     return (
-      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">
+      <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-400">
         Not configured
       </span>
     )
   }
   if (!status.alarm_enabled) {
     return (
-      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-400">
+      <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-400">
         Disabled
       </span>
     )
@@ -195,19 +195,19 @@ export default function BurglarAlarmPanel() {
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <ShieldAlert size={18} className="text-orange-400" />
-                  <h2 className="text-base font-semibold text-slate-200">Burglar Alarm</h2>
+                  <h2 className="text-base font-semibold text-zinc-200">Burglar Alarm</h2>
                 </div>
                 <button
                   onClick={() => selectedCam !== null && loadCamera(selectedCam)}
                   disabled={loading || selectedCam === null}
-                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50"
+                  className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 rounded-lg transition-colors disabled:opacity-50"
                   title="Refresh status"
                 >
                   <RefreshCw size={14} />
                 </button>
                 <button
                   onClick={loadVerification}
-                  className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+                  className="text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 px-3 py-1.5 rounded-lg transition-colors"
                   type="button"
                 >
                   Verify all
@@ -216,7 +216,7 @@ export default function BurglarAlarmPanel() {
 
               {/* Loading indicator */}
               {loading && (
-                <div className="bg-blue-900/40 border border-blue-700 text-blue-300 rounded-lg px-4 py-3 text-sm">
+                <div className="bg-emerald-900/40 border border-emerald-700 text-emerald-300 rounded-lg px-4 py-3 text-sm">
                   Loading cameras...
                 </div>
               )}
@@ -235,16 +235,16 @@ export default function BurglarAlarmPanel() {
 
               {/* No cameras message */}
               {!loading && cameras.length === 0 && (
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 text-slate-400 text-sm">
+                <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-zinc-400 text-sm">
                   No cameras configured. Add cameras in the Configuration tab.
                 </div>
               )}
 
               {/* Camera selector */}
               {cameras.length > 0 && (
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
+                <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                    <label className="text-sm text-slate-400 sm:w-32 sm:shrink-0">Camera</label>
+                    <label className="text-sm text-zinc-400 sm:w-32 sm:shrink-0">Camera</label>
                     <div className="flex items-center gap-3 flex-1">
                       <select
                         className={`${inputCls} flex-1`}
@@ -265,11 +265,11 @@ export default function BurglarAlarmPanel() {
               )}
 
               {verification && (
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
+                <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div>
-                      <p className="text-sm font-semibold text-slate-200">All-camera verification</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-sm font-semibold text-zinc-200">All-camera verification</p>
+                      <p className="text-xs text-zinc-500">
                         {verification.configured_count} / {verification.camera_count} configured
                       </p>
                     </div>
@@ -281,19 +281,19 @@ export default function BurglarAlarmPanel() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                     {verification.items.map(item => (
-                      <div key={item.camera_id} className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                      <div key={item.camera_id} className="rounded-lg border border-zinc-700 bg-zinc-900/40 p-3">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm text-slate-200">{item.camera_name || `Camera ${item.camera_id}`}</span>
+                          <span className="text-sm text-zinc-200">{item.camera_name || `Camera ${item.camera_id}`}</span>
                           <span className={`text-[11px] px-2 py-0.5 rounded-full ${
                             item.active_now ? 'bg-red-900/50 text-red-300'
                               : item.alarm_enabled ? 'bg-green-900/40 text-green-300'
-                              : 'bg-slate-700 text-slate-400'
+                              : 'bg-zinc-700 text-zinc-400'
                           }`}>
                             {!item.configured ? 'Missing' : item.alarm_enabled ? 'Enabled' : 'Disabled'}
                           </span>
                         </div>
                         {item.configured && (
-                          <p className="mt-1 text-xs text-slate-500">
+                          <p className="mt-1 text-xs text-zinc-500">
                             {item.alarm_start_time} - {item.alarm_end_time}
                           </p>
                         )}
@@ -306,15 +306,15 @@ export default function BurglarAlarmPanel() {
               {/* Configuration form */}
               {cameras.length > 0 && selectedCam !== null && (
                 <form onSubmit={handleSave}
-                  className="bg-slate-800 border border-slate-700 rounded-xl p-5 space-y-5">
+                  className="bg-zinc-800 border border-zinc-700 rounded-xl p-5 space-y-5">
 
-                  <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
                     <Clock size={14} /> Time Window & Zone
                   </h3>
 
                   {/* Enable toggle */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
-                    <label className="text-sm text-slate-400 sm:w-32 sm:shrink-0">Enabled</label>
+                    <label className="text-sm text-zinc-400 sm:w-32 sm:shrink-0">Enabled</label>
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
@@ -323,7 +323,7 @@ export default function BurglarAlarmPanel() {
                         className="w-4 h-4 accent-orange-500"
                         disabled={!isAdmin}
                       />
-                      <span className="text-sm text-slate-300">
+                      <span className="text-sm text-zinc-300">
                         {form.alarm_enabled ? 'Burglar alarm is enabled' : 'Burglar alarm is disabled'}
                       </span>
                     </label>
@@ -331,7 +331,7 @@ export default function BurglarAlarmPanel() {
 
                   {/* Start time */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
-                    <label className="text-sm text-slate-400 sm:w-32 sm:shrink-0">Alarm starts</label>
+                    <label className="text-sm text-zinc-400 sm:w-32 sm:shrink-0">Alarm starts</label>
                     <input
                       type="time"
                       className={inputCls}
@@ -344,7 +344,7 @@ export default function BurglarAlarmPanel() {
 
                   {/* End time */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
-                    <label className="text-sm text-slate-400 sm:w-32 sm:shrink-0">Alarm ends</label>
+                    <label className="text-sm text-zinc-400 sm:w-32 sm:shrink-0">Alarm ends</label>
                     <input
                       type="time"
                       className={inputCls}
@@ -355,13 +355,13 @@ export default function BurglarAlarmPanel() {
                     />
                   </div>
 
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-zinc-500">
                     Overnight windows are supported — e.g. 20:00 to 06:00 stays active through midnight.
                   </p>
 
                   {/* Zone selector */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
-                    <label className="text-sm text-slate-400 sm:w-32 sm:shrink-0">Monitored zone</label>
+                    <label className="text-sm text-zinc-400 sm:w-32 sm:shrink-0">Monitored zone</label>
                     <select
                       className={inputCls}
                       value={form.monitored_zone_id}
@@ -379,7 +379,7 @@ export default function BurglarAlarmPanel() {
 
                   {/* Cooldown */}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
-                    <label className="text-sm text-slate-400 sm:w-32 sm:shrink-0">
+                    <label className="text-sm text-zinc-400 sm:w-32 sm:shrink-0">
                       Cooldown (sec)
                     </label>
                     <div className="flex items-center gap-3 flex-1">
@@ -390,7 +390,7 @@ export default function BurglarAlarmPanel() {
                         className="flex-1"
                         disabled={!isAdmin}
                       />
-                      <span className="w-12 text-sm text-slate-300 text-right shrink-0">
+                      <span className="w-12 text-sm text-zinc-300 text-right shrink-0">
                         {form.cooldown_sec}s
                       </span>
                     </div>
@@ -411,7 +411,7 @@ export default function BurglarAlarmPanel() {
                         type="button"
                         onClick={handleDelete}
                         disabled={deleting || !status?.configured}
-                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-700 hover:bg-red-900/40 text-slate-400 hover:text-red-400 px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors disabled:opacity-40"
+                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-700 hover:bg-red-900/40 text-zinc-400 hover:text-red-400 px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors disabled:opacity-40"
                       >
                         <Trash2 size={14} />
                         {deleting ? 'Removing...' : 'Remove Config'}
@@ -422,12 +422,12 @@ export default function BurglarAlarmPanel() {
               )}
 
               {/* Info box */}
-              <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 text-xs text-slate-500 space-y-1.5">
-                <p className="font-semibold text-slate-400">How it works</p>
-                <p>• The burglar alarm monitors for <span className="text-slate-300">Person</span> detections inside the configured zone during the active time window.</p>
+              <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-4 text-xs text-zinc-500 space-y-1.5">
+                <p className="font-semibold text-zinc-400">How it works</p>
+                <p>• The burglar alarm monitors for <span className="text-zinc-300">Person</span> detections inside the configured zone during the active time window.</p>
                 <p>• When triggered it saves a snapshot, logs the event to the Reports panel, and fires the camera's assigned buzzers.</p>
-                <p>• Requires the camera stream to be <span className="text-slate-300">running</span>. Changes take effect on the next camera restart.</p>
-                <p>• Configure zones in the <span className="text-slate-300">Live View → ROI Editor</span> per camera.</p>
+                <p>• Requires the camera stream to be <span className="text-zinc-300">running</span>. Changes take effect on the next camera restart.</p>
+                <p>• Configure zones in the <span className="text-zinc-300">Live View → ROI Editor</span> per camera.</p>
               </div>
             </>
           )

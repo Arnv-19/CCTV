@@ -74,6 +74,16 @@ def create_tables():
             "END IF; "
             "END $$;"
         ))
+        # Backfill vehicle_detection toggle rows for any camera that doesn't have one yet
+        conn.execute(text("""
+            INSERT INTO camera_models (camera_id, model_name, is_enabled)
+            SELECT c.id, 'vehicle_detection', true
+            FROM cameras c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM camera_models cm
+                WHERE cm.camera_id = c.id AND cm.model_name = 'vehicle_detection'
+            )
+        """))
         # Feature config columns migrated from config.yaml to DB
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS missing_person_alert JSONB"))
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS crowd_alert JSONB"))

@@ -3,7 +3,7 @@ import CameraCard from './CameraCard'
 export default function LiveView({ cameras, running, streamEpoch, systemMetrics, onEditROI }) {
   if (cameras.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-500">
+      <div className="flex items-center justify-center h-full text-zinc-500">
         <div className="text-center">
           <p className="text-lg mb-2">No cameras configured</p>
           <p className="text-sm">Go to Configuration to add cameras.</p>
