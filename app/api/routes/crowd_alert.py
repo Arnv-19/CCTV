@@ -16,7 +16,6 @@ class CrowdAlertConfigRequest(BaseModel):
     enabled: Optional[bool] = None
     person_threshold: Optional[int] = Field(None, ge=1)
     sustained_seconds: Optional[float] = Field(None, ge=0)
-    cooldown_sec: Optional[int] = Field(None, ge=0)
     send_whatsapp: Optional[bool] = None
     per_camera: Optional[dict[str, dict]] = None
 
@@ -25,7 +24,6 @@ class CrowdAlertConfigResponse(BaseModel):
     enabled: bool
     person_threshold: int
     sustained_seconds: float
-    cooldown_sec: int
     send_whatsapp: bool
     per_camera: dict
 

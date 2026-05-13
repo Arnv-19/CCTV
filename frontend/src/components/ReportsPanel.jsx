@@ -10,18 +10,18 @@ import { Download, CheckCheck, AlertTriangle, Camera, Cpu, BellRing, FileText, F
 import { api } from '../api/client'
 
 const inputCls =
-  'bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm ' +
-  'text-slate-100 focus:outline-none focus:border-blue-500'
+  'bg-zinc-700 border border-zinc-600 rounded-lg px-3 py-2 text-sm ' +
+  'text-zinc-100 focus:outline-none focus:border-emerald-500'
 
 function SummaryCard({ icon: Icon, label, value, color }) {
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 flex items-center gap-4">
+    <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 flex items-center gap-4">
       <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${color}`}>
         <Icon size={18} />
       </div>
       <div>
-        <div className="text-xl font-bold text-slate-100">{value ?? '—'}</div>
-        <div className="text-xs text-slate-400">{label}</div>
+        <div className="text-xl font-bold text-zinc-100">{value ?? '—'}</div>
+        <div className="text-xs text-zinc-400">{label}</div>
       </div>
     </div>
   )
@@ -194,42 +194,42 @@ export default function ReportsPanel() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <SummaryCard icon={AlertTriangle} label="Today's alerts" value={summary.today_count}   color="bg-yellow-900/40 text-yellow-400" />
           <SummaryCard icon={BellRing}      label="Unacknowledged" value={summary.unacknowledged} color="bg-red-900/40 text-red-400" />
-          <SummaryCard icon={Camera}        label="Top camera"     value={summary.top_camera != null ? `Cam ${summary.top_camera}` : '—'} color="bg-blue-900/40 text-blue-400" />
+          <SummaryCard icon={Camera}        label="Top camera"     value={summary.top_camera != null ? `Cam ${summary.top_camera}` : '—'} color="bg-emerald-900/40 text-emerald-400" />
           <SummaryCard icon={Cpu}           label="Top model"      value={summary.top_model}      color="bg-purple-900/40 text-purple-400" />
         </div>
       )}
 
       {/* Filters */}
       <form onSubmit={handleFilter}
-        className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+        className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h3 className="text-sm font-semibold text-slate-100">Filter Alerts</h3>
-            <p className="text-xs text-slate-400">Camera aur date range ke hisaab se alerts dekhein.</p>
+            <h3 className="text-sm font-semibold text-zinc-100">Filter Alerts</h3>
+            <p className="text-xs text-zinc-400">Camera aur date range ke hisaab se alerts dekhein.</p>
           </div>
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-zinc-400">
             Showing {alerts.length} of {total} alerts
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="space-y-1">
-            <label className="text-xs text-slate-400">Camera ID</label>
+            <label className="text-xs text-zinc-400">Camera ID</label>
             <input className={`${inputCls} w-full`} type="number" placeholder="All cameras"
               value={filters.camera_id} onChange={e => setFilters({ ...filters, camera_id: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-slate-400">Date From</label>
+            <label className="text-xs text-zinc-400">Date From</label>
             <input className={`${inputCls} w-full color-scheme-dark`} type="date"
               value={filters.date_from} onChange={e => setFilters({ ...filters, date_from: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-slate-400">Date To</label>
+            <label className="text-xs text-zinc-400">Date To</label>
             <input className={`${inputCls} w-full color-scheme-dark`} type="date"
               value={filters.date_to} onChange={e => setFilters({ ...filters, date_to: e.target.value })} />
           </div>
           <div className="flex items-end gap-2">
             <button type="submit"
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
               Apply Filter
             </button>
             <button
@@ -240,7 +240,7 @@ export default function ReportsPanel() {
                 setAppliedFilters({ camera_id: '', date_from: '', date_to: '' })
                 setPage(1)
               }}
-              className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+              className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
             >
               Reset
             </button>
@@ -260,22 +260,22 @@ export default function ReportsPanel() {
             <MessageCircle size={14} /> WhatsApp Report
           </button>
           <button type="button" onClick={handleExport}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors sm:ml-auto">
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-semibold px-4 py-2 rounded-lg transition-colors sm:ml-auto">
             <Download size={14} /> Export CSV
           </button>
         </div>
       </form>
 
       {/* Table */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-x-auto">
+      <div className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-x-auto">
         {loading ? (
-          <div className="px-6 py-10 text-center text-slate-500 text-sm">Loading...</div>
+          <div className="px-6 py-10 text-center text-zinc-500 text-sm">Loading...</div>
         ) : alerts.length === 0 ? (
-          <div className="px-6 py-10 text-center text-slate-500 text-sm">No alerts found.</div>
+          <div className="px-6 py-10 text-center text-zinc-500 text-sm">No alerts found.</div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-700/50">
-              <tr className="text-left text-xs text-slate-400 uppercase tracking-wider">
+            <thead className="bg-zinc-700/50">
+              <tr className="text-left text-xs text-zinc-400 uppercase tracking-wider">
                 <th className="px-4 py-3">Time</th>
                 <th className="px-4 py-3">Camera</th>
                 <th className="px-4 py-3">Model</th>
@@ -285,28 +285,28 @@ export default function ReportsPanel() {
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700">
+            <tbody className="divide-y divide-zinc-700">
               {alerts.map(a => (
                 <tr key={a.id}
-                  className={`hover:bg-slate-700/30 transition-colors ${a.acknowledged ? 'opacity-60' : ''}`}>
-                  <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">
+                  className={`hover:bg-zinc-700/30 transition-colors ${a.acknowledged ? 'opacity-60' : ''}`}>
+                  <td className="px-4 py-3 text-zinc-400 text-xs whitespace-nowrap">
                     {new Date(a.triggered_at).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-slate-300">Cam {a.camera_id}</td>
-                  <td className="px-4 py-3 text-slate-300 font-mono text-xs">{a.model_name}</td>
+                  <td className="px-4 py-3 text-zinc-300">Cam {a.camera_id}</td>
+                  <td className="px-4 py-3 text-zinc-300 font-mono text-xs">{a.model_name}</td>
                   <td className="px-4 py-3">
                     <span className="bg-red-900/40 text-red-300 text-xs font-semibold px-2 py-0.5 rounded-full">
                       {a.violation_type}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-400 text-xs">
+                  <td className="px-4 py-3 text-zinc-400 text-xs">
                     {(a.confidence_score * 100).toFixed(0)}%
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                       a.buzzer_activated
                         ? 'bg-orange-900/40 text-orange-300'
-                        : 'bg-slate-700 text-slate-500'
+                        : 'bg-zinc-700 text-zinc-500'
                     }`}>
                       {a.buzzer_activated ? 'Fired' : 'No'}
                     </span>
@@ -325,7 +325,7 @@ export default function ReportsPanel() {
                       </span>
                     ) : (
                       <button onClick={() => handleAck(a.id)}
-                        className="text-xs text-blue-400 hover:text-blue-300 hover:underline">
+                        className="text-xs text-emerald-400 hover:text-emerald-300 hover:underline">
                         Acknowledge
                       </button>
                     )}
@@ -340,16 +340,16 @@ export default function ReportsPanel() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between gap-3 text-sm bg-slate-800 border border-slate-700 rounded-xl px-4 py-3">
-          <span className="text-slate-400">
+        <div className="flex items-center justify-between gap-3 text-sm bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3">
+          <span className="text-zinc-400">
             Page {page} of {totalPages}
           </span>
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors disabled:opacity-40">
+            className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg transition-colors disabled:opacity-40">
             Prev
           </button>
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors disabled:opacity-40">
+            className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg transition-colors disabled:opacity-40">
             Next
           </button>
         </div>

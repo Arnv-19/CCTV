@@ -6,8 +6,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { api } from '../api/client'
 
 const inputCls =
-  'w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-100 ' +
-  'placeholder-slate-500 focus:outline-none focus:border-blue-500'
+  'w-full bg-zinc-700 border border-zinc-600 rounded-lg px-3 py-2.5 text-sm text-zinc-100 ' +
+  'placeholder-zinc-500 focus:outline-none focus:border-emerald-500'
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -33,24 +33,24 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-zinc-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center">
             <Camera size={24} />
           </div>
-          <h1 className="text-2xl font-bold text-slate-100">Axis CCTV</h1>
-          <p className="text-sm text-slate-400">Sign in to your account</p>
+          <h1 className="text-2xl font-bold text-zinc-100">Axis CCTV</h1>
+          <p className="text-sm text-zinc-400">Sign in to your account</p>
         </div>
 
         {/* Form */}
         <form
           onSubmit={handleSubmit}
-          className="bg-slate-800 border border-slate-700 rounded-xl p-6 space-y-4"
+          className="bg-zinc-800 border border-zinc-700 rounded-xl p-6 space-y-4"
         >
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">
               Email
             </label>
             <input
@@ -64,7 +64,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">
               Password
             </label>
             <input
@@ -80,7 +80,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700
+            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700
                        text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 text-sm"
           >
             <LogIn size={15} />
@@ -88,10 +88,10 @@ export default function LoginPage() {
           </button>
 
           <div className="flex items-center justify-between text-sm">
-            <Link to="/register" className="text-blue-400 hover:text-blue-300">
+            <Link to="/register" className="text-emerald-400 hover:text-emerald-300">
               Create account
             </Link>
-            <Link to="/forgot-password" className="text-slate-300 hover:text-slate-100">
+            <Link to="/forgot-password" className="text-zinc-300 hover:text-zinc-100">
               Forgot password?
             </Link>
           </div>

@@ -41,13 +41,13 @@ export default function LogsPanel() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-sm text-slate-400">{logs.length} entries</span>
-          <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
+          <span className="text-sm text-zinc-400">{logs.length} entries</span>
+          <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="accent-blue-500"
+              className="accent-emerald-500"
             />
             Auto-refresh (5s)
           </label>
@@ -55,14 +55,14 @@ export default function LogsPanel() {
         <div className="flex gap-2">
           <button
             onClick={() => fetchLogs(true)}
-            className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-lg transition-colors"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             Refresh
           </button>
           <button
             onClick={clearLogs}
-            className="flex items-center gap-1.5 text-sm text-red-400 hover:text-red-300 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 text-sm text-red-400 hover:text-red-300 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-lg transition-colors"
           >
             <Trash2 size={13} />
             Clear
@@ -71,16 +71,16 @@ export default function LogsPanel() {
       </div>
 
       {/* Log output */}
-      <div className="flex-1 bg-slate-900 border border-slate-700 rounded-xl overflow-y-auto p-4 font-mono text-xs leading-6">
+      <div className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl overflow-y-auto p-4 font-mono text-xs leading-6">
         {logs.length === 0 ? (
-          <p className="text-slate-600">No alerts logged yet.</p>
+          <p className="text-zinc-600">No alerts logged yet.</p>
         ) : (
           logs.map((line, i) => {
             const isViolation = line.toLowerCase().includes('no helmet')
             return (
               <div
                 key={i}
-                className={`${isViolation ? 'text-red-400' : 'text-slate-400'}`}
+                className={`${isViolation ? 'text-red-400' : 'text-zinc-400'}`}
               >
                 {line}
               </div>

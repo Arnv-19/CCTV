@@ -203,18 +203,7 @@ def fetch_enabled_models_for_camera(cam_id: int) -> list[str] | None:
             if not rows:
                 return None
 
-            known_defaults = {
-                "helmet_detection", "gloves_detection", "vest_detection",
-                "fire_detection", "glasses_detection", "mask_detection",
-            }
-            enabled = set(known_defaults)
-            for r in rows:
-                if r.is_enabled:
-                    enabled.add(r.model_name)
-                else:
-                    enabled.discard(r.model_name)
-
-            result = sorted(enabled)
+            result = sorted(r.model_name for r in rows if r.is_enabled)
             print(f"[CameraManager] Camera {cam_id} enabled models: {result}")
             return result
     except Exception as e:

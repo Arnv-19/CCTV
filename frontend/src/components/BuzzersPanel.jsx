@@ -10,8 +10,8 @@ import { Bell, BellOff, Plus, Trash2, Pencil } from 'lucide-react'
 import { api } from '../api/client'
 
 const inputCls =
-  'w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm ' +
-  'text-slate-100 focus:outline-none focus:border-blue-500'
+  'w-full bg-zinc-700 border border-zinc-600 rounded-lg px-3 py-2 text-sm ' +
+  'text-zinc-100 focus:outline-none focus:border-emerald-500'
 
 const PROTOCOLS = ['usb', 'http', 'mqtt', 'gpio']
 
@@ -21,11 +21,11 @@ const EMPTY_FORM = {
 
 function protocolBadgeColor(p) {
   return {
-    usb: 'bg-blue-900/40 text-blue-300',
+    usb: 'bg-emerald-900/40 text-emerald-300',
     http: 'bg-green-900/40 text-green-300',
     mqtt: 'bg-orange-900/40 text-orange-300',
     gpio: 'bg-purple-900/40 text-purple-300',
-  }[p] ?? 'bg-slate-700 text-slate-300'
+  }[p] ?? 'bg-zinc-700 text-zinc-300'
 }
 
 export default function BuzzersPanel() {
@@ -97,24 +97,24 @@ export default function BuzzersPanel() {
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-slate-200">Buzzer Devices</h2>
+        <h2 className="text-base font-semibold text-zinc-200">Buzzer Devices</h2>
         <button onClick={openCreate}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm
                      font-semibold px-4 py-2 rounded-lg transition-colors">
           <Plus size={14} /> Add Buzzer
         </button>
       </div>
 
       {/* Buzzer list */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-x-auto">
+      <div className="bg-zinc-800 border border-zinc-700 rounded-xl overflow-x-auto">
         {buzzers.length === 0 ? (
-          <div className="px-6 py-10 text-center text-slate-500 text-sm">
+          <div className="px-6 py-10 text-center text-zinc-500 text-sm">
             No buzzers configured. Click "Add Buzzer" to create one.
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-700/50">
-              <tr className="text-left text-xs text-slate-400 uppercase tracking-wider">
+            <thead className="bg-zinc-700/50">
+              <tr className="text-left text-xs text-zinc-400 uppercase tracking-wider">
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Protocol</th>
                 <th className="px-4 py-3">Connection</th>
@@ -122,16 +122,16 @@ export default function BuzzersPanel() {
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700">
+            <tbody className="divide-y divide-zinc-700">
               {buzzers.map(b => (
-                <tr key={b.id} className="hover:bg-slate-700/30 transition-colors">
-                  <td className="px-4 py-3 text-slate-200 font-medium">{b.name}</td>
+                <tr key={b.id} className="hover:bg-zinc-700/30 transition-colors">
+                  <td className="px-4 py-3 text-zinc-200 font-medium">{b.name}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${protocolBadgeColor(b.protocol)}`}>
                       {b.protocol.toUpperCase()}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-400 font-mono text-xs">
+                  <td className="px-4 py-3 text-zinc-400 font-mono text-xs">
                     {b.device_id || b.ip_address || (b.gpio_pin != null ? `GPIO ${b.gpio_pin}` : '—')}
                     {b.port ? `:${b.port}` : ''}
                   </td>
@@ -140,7 +140,7 @@ export default function BuzzersPanel() {
                       className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-colors
                         ${b.is_active
                           ? 'bg-green-900/40 text-green-400 hover:bg-red-900/40 hover:text-red-400'
-                          : 'bg-slate-700 text-slate-500 hover:bg-green-900/40 hover:text-green-400'}`}>
+                          : 'bg-zinc-700 text-zinc-500 hover:bg-green-900/40 hover:text-green-400'}`}>
                       {b.is_active ? <Bell size={11} /> : <BellOff size={11} />}
                       {b.is_active ? 'Active' : 'Disabled'}
                     </button>
@@ -148,11 +148,11 @@ export default function BuzzersPanel() {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => openEdit(b)}
-                        className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-900/30 rounded-lg transition-colors">
+                        className="p-1.5 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-900/30 rounded-lg transition-colors">
                         <Pencil size={14} />
                       </button>
                       <button onClick={() => handleDelete(b.id)}
-                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition-colors">
+                        className="p-1.5 text-zinc-400 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition-colors">
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -168,8 +168,8 @@ export default function BuzzersPanel() {
       {showForm && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <form onSubmit={handleSubmit}
-            className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4">
-            <h4 className="font-semibold text-slate-200">
+            className="bg-zinc-800 border border-zinc-700 rounded-xl p-6 w-full max-w-md space-y-4">
+            <h4 className="font-semibold text-zinc-200">
               {editId !== null ? 'Edit Buzzer' : 'New Buzzer'}
             </h4>
 
@@ -203,19 +203,19 @@ export default function BuzzersPanel() {
               )}
 
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 accent-blue-500"
+                <input type="checkbox" className="w-4 h-4 accent-emerald-500"
                   checked={f.is_active} onChange={e => setForm({ ...f, is_active: e.target.checked })} />
-                <span className="text-sm text-slate-300">Active</span>
+                <span className="text-sm text-zinc-300">Active</span>
               </label>
             </div>
 
             <div className="flex gap-3 pt-1">
               <button type="button" onClick={() => setShowForm(false)}
-                className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm py-2 rounded-lg transition-colors">
+                className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-sm py-2 rounded-lg transition-colors">
                 Cancel
               </button>
               <button type="submit" disabled={loading}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors disabled:opacity-50">
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors disabled:opacity-50">
                 {loading ? 'Saving...' : 'Save'}
               </button>
             </div>

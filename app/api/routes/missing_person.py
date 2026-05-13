@@ -15,7 +15,6 @@ router = APIRouter()
 class MissingPersonConfigRequest(BaseModel):
     enabled: Optional[bool] = None
     missing_frames: Optional[int] = Field(None, ge=1)
-    cooldown_sec: Optional[int] = Field(None, ge=0)
     send_whatsapp: Optional[bool] = None
     per_camera: Optional[dict[str, dict]] = None
 
@@ -23,7 +22,6 @@ class MissingPersonConfigRequest(BaseModel):
 class MissingPersonConfigResponse(BaseModel):
     enabled: bool
     missing_frames: int
-    cooldown_sec: int
     send_whatsapp: bool
     per_camera: dict
 

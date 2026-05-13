@@ -5,8 +5,8 @@ import toast from 'react-hot-toast'
 import { api } from '../api/client'
 
 const inputCls =
-  'w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-100 ' +
-  'placeholder-slate-500 focus:outline-none focus:border-blue-500'
+  'w-full bg-zinc-700 border border-zinc-600 rounded-lg px-3 py-2.5 text-sm text-zinc-100 ' +
+  'placeholder-zinc-500 focus:outline-none focus:border-emerald-500'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -34,22 +34,22 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-zinc-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center">
             <Camera size={24} />
           </div>
-          <h1 className="text-2xl font-bold text-slate-100">Create Account</h1>
-          <p className="text-sm text-slate-400">Register with your email and password</p>
+          <h1 className="text-2xl font-bold text-zinc-100">Create Account</h1>
+          <p className="text-sm text-zinc-400">Register with your email and password</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-slate-800 border border-slate-700 rounded-xl p-6 space-y-4"
+          className="bg-zinc-800 border border-zinc-700 rounded-xl p-6 space-y-4"
         >
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">
               Email
             </label>
             <input
@@ -63,7 +63,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">
               Password
             </label>
             <input
@@ -75,11 +75,11 @@ export default function RegisterPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-            <p className="text-xs text-slate-500">Minimum 8 characters</p>
+            <p className="text-xs text-zinc-500">Minimum 8 characters</p>
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">
               Phone Number (Optional)
             </label>
             <input
@@ -95,16 +95,16 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700
+            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700
                        text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 text-sm"
           >
             <UserPlus size={15} />
             {loading ? 'Creating account...' : 'Register'}
           </button>
 
-          <p className="text-sm text-center text-slate-400">
+          <p className="text-sm text-center text-zinc-400">
             Already have an account?{' '}
-            <Link to="/login" className="text-blue-400 hover:text-blue-300">
+            <Link to="/login" className="text-emerald-400 hover:text-emerald-300">
               Sign in
             </Link>
           </p>
