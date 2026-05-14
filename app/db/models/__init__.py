@@ -12,6 +12,8 @@ from .camera_buzzer import CameraBuzzer
 from .alert import Alert
 from .burglar_alarm_event import BurglarAlarmEvent
 from .app_config import AppConfig
+from .vehicle_detection_event import VehicleDetectionEvent
+from .camera_model import CameraModel
 
 __all__ = [
     "Camera", "ROI", "BurglarAlarmConfig",
@@ -20,4 +22,6 @@ __all__ = [
     "Buzzer", "CameraBuzzer",
     "Alert", "BurglarAlarmEvent",
     "AppConfig",
+    "VehicleDetectionEvent",
+    "CameraModel",
 ]

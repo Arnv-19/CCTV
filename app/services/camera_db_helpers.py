@@ -95,6 +95,7 @@ def load_model_config_for_camera(cam_id: int) -> dict | None:
             main_path         = None
             gloves_path       = None
             person_path       = None
+            vehicle_path      = None
             main_conf         = 0.25
             violation_classes: list[str] = []
             safe_classes:      list[str] = []
@@ -112,6 +113,8 @@ def load_model_config_for_camera(cam_id: int) -> dict | None:
                     gloves_path = weight
                 elif "person" in mname or "burglar" in mname:
                     person_path = weight
+                elif "vehicle" in mname:
+                    vehicle_path = weight
                 else:
                     main_path = weight
                     main_conf = conf
@@ -136,12 +139,14 @@ def load_model_config_for_camera(cam_id: int) -> dict | None:
 
             print(
                 f"[CameraManager] Camera {cam_id}: model={Path(main_path).name}, "
+                f"vehicle={Path(vehicle_path).name if vehicle_path else None}, "
                 f"violations={violation_classes}, safe={safe_classes}"
             )
             return {
                 "main_model_path":      main_path,
                 "gloves_model_path":    gloves_path,
                 "person_model_path":    person_path,
+                "vehicle_model_path":   vehicle_path,
                 "confidence_threshold": main_conf,
                 "violation_classes":    violation_classes,
                 "safe_classes":         safe_classes,

@@ -33,5 +33,6 @@ class Camera(Base):
     burglar_alarm_config = relationship("BurglarAlarmConfig", back_populates="camera", cascade="all, delete-orphan", uselist=False)
 
     # Historical Event Logs (Preserved on Camera Deletion)[cite: 3, 4]
-    alerts               = relationship("Alert", back_populates="camera")
-    burglar_alarm_events = relationship("BurglarAlarmEvent", back_populates="camera")
+    alerts                   = relationship("Alert", back_populates="camera")
+    burglar_alarm_events     = relationship("BurglarAlarmEvent", back_populates="camera")
+    vehicle_detection_events = relationship("VehicleDetectionEvent", back_populates="camera")

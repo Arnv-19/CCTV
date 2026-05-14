@@ -41,3 +41,4 @@ Thumbs.db
 .vscode/
 config.yaml
 tests/
+testdataset/

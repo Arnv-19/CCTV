@@ -37,6 +37,7 @@ from app.api.routes import ai_models as ai_models_router
 from app.api.routes import camera_assignments as camera_assignments_router
 from app.api.routes import missing_person, crowd_alert, dynamic_fps, snapshot_whatsapp, burglar_alarm_verify
 from app.api.routes import files as files_router
+from app.api.routes import vehicle_detection as vehicle_detection_router
 
 
 class SafeStaticFiles(StaticFiles):
@@ -109,6 +110,7 @@ app.include_router(dynamic_fps.router,                prefix="/api/dynamic-fps",
 app.include_router(snapshot_whatsapp.router,          prefix="/api/snapshot-whatsapp",    tags=["snapshot-whatsapp"])
 app.include_router(burglar_alarm_verify.router,       prefix="/api/burglar-alarm/verify", tags=["burglar-alarm"])
 app.include_router(files_router.router,               prefix="/api/files",                tags=["files"])
+app.include_router(vehicle_detection_router.router,   prefix="/api/vehicle-detections",   tags=["vehicle-detections"])
 
 
 # ── Health check (used by CI/CD deploy pipeline) ──────────────────────────
