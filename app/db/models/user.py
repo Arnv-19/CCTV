@@ -18,6 +18,6 @@ class User(Base):
     last_login    = Column(DateTime, nullable=True)
 
     # -- Relationships --
-    acknowledged_alerts = relationship("Alert", back_populates="acknowledger", foreign_keys="Alert.acknowledged_by")
-    acknowledged_burglar_events = relationship("BurglarAlarmEvent", back_populates="acknowledger", foreign_keys="BurglarAlarmEvent.acknowledged_by")
-    password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
+    acknowledged_alerts          = relationship("Alert", back_populates="acknowledger", foreign_keys="Alert.acknowledged_by")
+    acknowledged_burglar_events  = relationship("BurglarAlarmEvent", back_populates="acknowledger", foreign_keys="BurglarAlarmEvent.acknowledged_by")
+    password_reset_tokens        = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")

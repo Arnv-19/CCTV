@@ -44,6 +44,7 @@ def alert_writer_loop(queue: Queue):
     try:
         from app.db.database import SessionLocal, ensure_database_connected
         from app.db.models import Alert, BurglarAlarmEvent
+        from app.db.models.vehicle_detection_event import VehicleDetectionEvent
     except Exception as e:
         print(f"[AlertWriter] Import error — DB writes disabled: {e}")
         return
@@ -75,6 +76,17 @@ def alert_writer_loop(queue: Queue):
                         bbox_y2             = item.get("bbox_y2"),
                         frame_width         = item.get("frame_width"),
                         frame_height        = item.get("frame_height"),
+                    ))
+                elif item.get("model_name") == "vehicle_detection":
+                    db.add(VehicleDetectionEvent(
+                        camera_id           = item["camera_id"],
+                        vehicle_class       = item.get("vehicle_class", "vehicle"),
+                        confidence_score    = item.get("confidence_score", 0.0),
+                        plate_number        = item.get("plate_number"),
+                        plate_confidence    = item.get("plate_confidence"),
+                        snapshot_path       = item.get("snapshot_path"),
+                        plate_snapshot_path = item.get("plate_snapshot_path"),
+                        triggered_at        = _now_ist(),
                     ))
                 else:
                     db.add(Alert(

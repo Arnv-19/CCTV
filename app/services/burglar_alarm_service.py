@@ -106,18 +106,41 @@ def is_person_in_zone(
 
 def init_kcf_tracker(frame, bbox: list | tuple):
     """
-    Create a KCF tracker and initialize it with *bbox* on *frame*.
+    Create a tracker and initialize it with *bbox* on *frame*.
 
     *bbox* is [x1, y1, x2, y2] in pixel coordinates (as returned by YOLO).
-    Returns the initialized cv2.TrackerKCF instance, or None on failure.
+    Returns the initialized tracker instance, or None on failure.
+
+    Tracker priority (OpenCV 4.5+ removed TrackerKCF from the default build):
+      1. TrackerKCF  — fastest, ideal for PPE/person tracking
+      2. TrackerMIL  — robust fallback, no extra model files needed
     """
     try:
         x1, y1, x2, y2 = map(int, bbox)
-        # OpenCV tracker expects (x, y, w, h)
-        rect = (x1, y1, x2 - x1, y2 - y1)
-        tracker = cv2.TrackerKCF_create()
+        fh, fw = frame.shape[:2]
+
+        # Clamp to frame bounds
+        x1 = max(0, min(x1, fw - 1))
+        y1 = max(0, min(y1, fh - 1))
+        x2 = max(0, min(x2, fw))
+        y2 = max(0, min(y2, fh))
+
+        w, h = x2 - x1, y2 - y1
+        # TrackerMIL needs at least 20x20 px to generate positive samples
+        if w < 20 or h < 20:
+            return None
+
+        rect = (x1, y1, w, h)   # OpenCV expects (x, y, w, h)
+
+        if hasattr(cv2, "TrackerKCF_create"):
+            tracker = cv2.TrackerKCF_create()
+        elif hasattr(cv2, "TrackerMIL_create"):
+            tracker = cv2.TrackerMIL_create()
+        else:
+            print("[KCF] No suitable tracker available in this OpenCV build.")
+            return None
+
         ok = tracker.init(frame, rect)
-        # OpenCV ≥4.x returns None on success; only discard on explicit False
         if ok is False:
             return None
         return tracker

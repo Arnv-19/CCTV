@@ -26,7 +26,7 @@ load_dotenv()
 from sqlalchemy import text
 
 from app.db.database import Base, SessionLocal, ensure_database_connected
-from app.db.models import Alert, User
+from app.db.models import Alert, User, VehicleDetectionEvent  # noqa: F401 — ensures table is registered
 from app.services.auth_service import hash_password
 
 
@@ -74,20 +74,81 @@ def create_tables():
             "END IF; "
             "END $$;"
         ))
-        # Backfill vehicle_detection toggle rows for any camera that doesn't have one yet
-        conn.execute(text("""
-            INSERT INTO camera_models (camera_id, model_name, is_enabled)
-            SELECT c.id, 'vehicle_detection', true
-            FROM cameras c
-            WHERE NOT EXISTS (
-                SELECT 1 FROM camera_models cm
-                WHERE cm.camera_id = c.id AND cm.model_name = 'vehicle_detection'
-            )
-        """))
+        # Backfill all known model-type toggle rows for any camera missing them.
+        # This ensures the "AI Models per Camera" UI section always has data,
+        # even for cameras created before a model type was added to _KNOWN_MODEL_TYPES.
+        for _model_type in (
+            'helmet_detection', 'gloves_detection', 'vest_detection',
+            'fire_detection',
+            # 'glasses_detection',  # not in use
+            # 'mask_detection',     # not in use
+            'vehicle_detection',
+        ):
+            conn.execute(text(f"""
+                INSERT INTO camera_models (camera_id, model_name, is_enabled)
+                SELECT c.id, '{_model_type}', true
+                FROM cameras c
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM camera_models cm
+                    WHERE cm.camera_id = c.id AND cm.model_name = '{_model_type}'
+                )
+            """))
         # Feature config columns migrated from config.yaml to DB
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS missing_person_alert JSONB"))
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS crowd_alert JSONB"))
         conn.execute(text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS dynamic_fps JSONB"))
+        # vehicle_detection_events — created by create_all() on new installs;
+        # existing deployments need the FK constraints added explicitly.
+        conn.execute(text("""
+            DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables
+                       WHERE table_name = 'vehicle_detection_events') THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'vehicle_detection_events_camera_id_fkey'
+                ) THEN
+                    ALTER TABLE vehicle_detection_events
+                    ADD CONSTRAINT vehicle_detection_events_camera_id_fkey
+                    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE SET NULL;
+                END IF;
+            END IF;
+            END $$;
+        """))
+
+        # ── Seed vehicle AI model (runs on every startup; INSERT is a no-op if
+        #    the row already exists).
+        conn.execute(text("""
+            INSERT INTO ai_models
+                (name, display_name, weight_path, model_type,
+                 yolo_imgsz, confidence_threshold, description, is_active, created_at)
+            SELECT
+                'vehicle_model',
+                'Vehicle Detection',
+                'weights/Vehicle.pt',
+                'yolov8',
+                640, 0.25,
+                'YOLOv8 vehicle detection — detects cars, trucks, buses, motorcycles and extracts number plates via OCR.',
+                true,
+                NOW()
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ai_models WHERE name = 'vehicle_model'
+            );
+        """))
+
+        # ── Assign vehicle model to every camera that doesn't have it yet.
+        #    camera_model_assignments controls which models the inference server loads.
+        conn.execute(text("""
+            INSERT INTO camera_model_assignments
+                (camera_id, model_id, is_enabled, assigned_at, updated_at)
+            SELECT c.id, m.id, true, NOW(), NOW()
+            FROM cameras c
+            CROSS JOIN ai_models m
+            WHERE m.name = 'vehicle_model'
+            AND NOT EXISTS (
+                SELECT 1 FROM camera_model_assignments
+                WHERE camera_id = c.id AND model_id = m.id
+            );
+        """))
         # alerts.camera_id must be nullable so historical alerts are preserved when
         # a camera is deleted (ON DELETE SET NULL). Drop NOT NULL if still present.
         conn.execute(text("ALTER TABLE alerts ALTER COLUMN camera_id DROP NOT NULL"))

@@ -25,7 +25,7 @@ confidence_threshold: 0.25
 esp_ip: ''
 
 # Model paths — update when deploying new weights
-model_path: weights/best (3).pt 
+model_path: weights/best (3).pt
 ppe_model_path: weights/best (3).pt
 gloves_model_path: weights/best (3).pt
 person_model_path: weights/best (3).pt

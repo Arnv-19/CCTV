@@ -162,10 +162,8 @@ class CameraManager:
                     settings=dyn_settings,
                 )
 
-        extra_models      = cfg.get("extra_models") or {}
-
         self._start_alert_writer()
-        self._launch_inference_servers(camera_configs, batch_size, inference_fps, yolo_imgsz, extra_models)
+        self._launch_inference_servers(camera_configs, batch_size, inference_fps, yolo_imgsz)
         self._launch_camera_workers(
             camera_configs, cooldown, snapshot_cooldown, yolo_imgsz, burglar_test_sound, inference_fps
         )
@@ -491,12 +489,14 @@ class CameraManager:
             viol = self.violation_classes
             safe = self.safe_classes
 
-        gloves = cfg.get("gloves_model_path", "")
-        person = cfg.get("person_model_path", "")
+        gloves  = cfg.get("gloves_model_path", "")
+        person  = cfg.get("person_model_path", "")
+        vehicle = cfg.get("vehicle_model_path", "")
         return {
             "main_model_path":      abs_main,
-            "gloves_model_path":    str(_resolve_local_path(gloves)) if gloves else None,
-            "person_model_path":    str(_resolve_local_path(person)) if person else None,
+            "gloves_model_path":    str(_resolve_local_path(gloves))  if gloves  else None,
+            "person_model_path":    str(_resolve_local_path(person))  if person  else None,
+            "vehicle_model_path":   str(_resolve_local_path(vehicle)) if vehicle else None,
             "confidence_threshold": cfg.get("confidence_threshold", 0.25),
             "violation_classes":    viol,
             "safe_classes":         safe,
@@ -504,7 +504,6 @@ class CameraManager:
 
     def _launch_inference_servers(
         self, camera_configs: list, batch_size: int, inference_fps: float, yolo_imgsz: int,
-        extra_models: dict = None,
     ):
         """One InferenceServer process per unique main model path."""
         model_groups: dict[str, list] = {}
@@ -532,18 +531,20 @@ class CameraManager:
             stop_ev     = mp.Event()
             self._inference_stop_events[mk] = stop_ev
 
-            # Build the unified models dict: "main" is required; all others are optional.
-            # Keys "gloves" and "burglar" are consumed by result_handler_worker for
-            # MediaPipe overlay and KCF tracking respectively. Any other key is an
-            # extra model whose detections land in extra_dets in the result tuple.
+            # Build the unified models dict from DB-loaded paths.
+            # "main" is required. "gloves" and "burglar" drive MediaPipe/KCF logic
+            # in result_handler_worker. "vehicle" drives vehicle + OCR detection.
+            # All paths come from ai_models + camera_model_assignments in the DB.
             _models: dict = {"main": mk}
             gp = rep.get("gloves_model_path")
             pp = rep.get("person_model_path")
+            vp = rep.get("vehicle_model_path")
             if gp:
-                _models["gloves"] = gp
+                _models["gloves"]  = gp
             if pp:
                 _models["burglar"] = pp
-            _models.update(extra_models or {})
+            if vp:
+                _models["vehicle"] = vp
 
             srv = mp.Process(
                 target=inference_server_loop,
