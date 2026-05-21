@@ -42,3 +42,6 @@ Thumbs.db
 config.yaml
 tests/
 testdataset/
+docs
+Face_Detection_Phase2_Design.docx
+generate_face_doc.py
