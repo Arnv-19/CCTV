@@ -390,6 +390,8 @@ def send_daily_report_whatsapp(
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"WhatsApp error ({type(exc).__name__}): {exc}") from exc
 
     return {
         "report_date": resolved_date.isoformat(),

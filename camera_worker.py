@@ -64,6 +64,7 @@ def start_ffmpeg(rtsp_url: str, width: int = 960, height: int = 720) -> subproce
     # For a numeric source (webcam index) fall back to OpenCV; FFmpeg needs a
     # proper URL or device path, not a plain integer.
     if isinstance(rtsp_url, int) or (isinstance(rtsp_url, str) and rtsp_url.isdigit()):
+        print("[DEBUG] Using OpenCV for webcam source.")
         return None  # caller will use legacy cv2.VideoCapture for webcams
 
     # fps is now configurable; default to 4 if not provided
@@ -72,18 +73,26 @@ def start_ffmpeg(rtsp_url: str, width: int = 960, height: int = 720) -> subproce
         "ffmpeg",
         "-loglevel", "warning",
         "-rtsp_transport", "tcp",
-        "-stimeout", "10000000",   # 10s connection timeout (microseconds)
         "-i", rtsp_url,
         "-vf", f"scale={width}:{height},fps={fps},format=bgr24",
         "-f", "rawvideo",
         "-"
     ]
-    return subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,   # capture so we can log errors
-        bufsize=10 ** 8,
-    )
+
+    print(f"[DEBUG] Starting FFmpeg with command: {' '.join(cmd)}")
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,   # capture so we can log errors
+            bufsize=10 ** 8,
+        )
+        print("[DEBUG] FFmpeg subprocess started successfully.")
+        return process
+    except Exception as e:
+        print(f"[ERROR] Failed to start FFmpeg subprocess: {e}")
+        return None
 
 
 def ensure_dir(path: str):
