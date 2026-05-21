@@ -24,35 +24,48 @@ from .schemas import ROICreate, ROIUpdate
 logger = logging.getLogger(__name__)
 
 
+def _camera_id_int(camera_id: int | str) -> int:
+    try:
+        return int(camera_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"camera_id must be numeric, got {camera_id!r}") from exc
+
+
+def _camera_cache_key(camera_id: int | str) -> str:
+    return str(_camera_id_int(camera_id))
+
+
 # ---------------------------------------------------------------------------
 # Read
 # ---------------------------------------------------------------------------
 
 def get_camera_rois(
     db: Session,
-    camera_id: str,
+    camera_id: int | str,
     active_only: bool = False,
 ) -> List[ROI]:
     """Return ROIs for a camera, ordered by priority desc then created_at asc."""
-    q = db.query(ROI).filter(ROI.camera_id == camera_id)
+    cam_id = _camera_id_int(camera_id)
+    q = db.query(ROI).filter(ROI.camera_id == cam_id)
     if active_only:
         q = q.filter(ROI.is_active.is_(True))
     return q.order_by(ROI.priority.desc(), ROI.created_at).all()
 
 
-def get_camera_rois_cached(db: Session, camera_id: str) -> List[dict]:
+def get_camera_rois_cached(db: Session, camera_id: int | str) -> List[dict]:
     """
     Return active ROIs as dicts, served from cache when possible.
     Used in the hot detection-filtering path.
     """
     cache = get_roi_cache()
-    hit = cache.get(camera_id)
+    cache_key = _camera_cache_key(camera_id)
+    hit = cache.get(cache_key)
     if hit is not None:
         return hit
 
     rois = get_camera_rois(db, camera_id, active_only=True)
     dicts = [r.to_dict() for r in rois]
-    cache.set(camera_id, dicts)
+    cache.set(cache_key, dicts)
     return dicts
 
 
@@ -69,13 +82,14 @@ def get_roi_by_id(db: Session, roi_id: str) -> ROI:
 
 def create_roi(
     db: Session,
-    camera_id: str,
+    camera_id: int | str,
     data: ROICreate,
     created_by: Optional[str] = None,
 ) -> ROI:
-    count = db.query(ROI).filter(ROI.camera_id == camera_id).count()
+    cam_id = _camera_id_int(camera_id)
+    count = db.query(ROI).filter(ROI.camera_id == cam_id).count()
     if count >= roi_config.max_rois_per_camera:
-        raise ROILimitExceededError(camera_id, roi_config.max_rois_per_camera)
+        raise ROILimitExceededError(str(cam_id), roi_config.max_rois_per_camera)
 
     if len(data.points_normalized) > roi_config.max_points_per_roi:
         raise InvalidPolygonError(f"Exceeds max_points_per_roi={roi_config.max_points_per_roi}")
@@ -86,7 +100,7 @@ def create_roi(
 
     roi = ROI(
         roi_id=str(uuid.uuid4()),
-        camera_id=camera_id,
+        camera_id=cam_id,
         name=data.name,
         points_normalized=[{"x": p.x, "y": p.y} for p in data.points_normalized],
         is_active=data.is_active,
@@ -102,8 +116,8 @@ def create_roi(
     db.commit()
     db.refresh(roi)
 
-    get_roi_cache().invalidate(camera_id)
-    logger.info("ROI created roi_id=%s camera_id=%s by=%s", roi.roi_id, camera_id, created_by)
+    get_roi_cache().invalidate(str(cam_id))
+    logger.info("ROI created roi_id=%s camera_id=%s by=%s", roi.roi_id, cam_id, created_by)
     return roi
 
 
@@ -141,7 +155,7 @@ def update_roi(db: Session, roi_id: str, data: ROIUpdate) -> ROI:
     db.commit()
     db.refresh(roi)
 
-    get_roi_cache().invalidate(roi.camera_id)
+    get_roi_cache().invalidate(str(roi.camera_id))
     logger.info("ROI updated roi_id=%s", roi_id)
     return roi
 
@@ -155,7 +169,7 @@ def delete_roi(db: Session, roi_id: str) -> None:
     camera_id = roi.camera_id
     db.delete(roi)
     db.commit()
-    get_roi_cache().invalidate(camera_id)
+    get_roi_cache().invalidate(str(camera_id))
     logger.info("ROI deleted roi_id=%s camera_id=%s", roi_id, camera_id)
 
 
@@ -169,7 +183,7 @@ def toggle_roi(db: Session, roi_id: str) -> ROI:
     roi.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(roi)
-    get_roi_cache().invalidate(roi.camera_id)
+    get_roi_cache().invalidate(str(roi.camera_id))
     logger.info(
         "ROI toggled roi_id=%s -> is_active=%s", roi_id, roi.is_active
     )
@@ -182,7 +196,7 @@ def toggle_roi(db: Session, roi_id: str) -> ROI:
 
 def bulk_replace_rois(
     db: Session,
-    camera_id: str,
+    camera_id: int | str,
     rois_data: List[ROICreate],
     created_by: Optional[str] = None,
 ) -> List[ROI]:
@@ -190,22 +204,23 @@ def bulk_replace_rois(
     Atomically replace all ROIs for *camera_id* with *rois_data*.
     Validates all polygons before touching the database.
     """
+    cam_id = _camera_id_int(camera_id)
     if len(rois_data) > roi_config.max_rois_per_camera:
-        raise ROILimitExceededError(camera_id, roi_config.max_rois_per_camera)
+        raise ROILimitExceededError(str(cam_id), roi_config.max_rois_per_camera)
 
     for i, data in enumerate(rois_data):
         valid, reason = validate_polygon([p.model_dump() for p in data.points_normalized])
         if not valid:
             raise InvalidPolygonError(f"ROI #{i} '{data.name}': {reason}")
 
-    db.query(ROI).filter(ROI.camera_id == camera_id).delete()
+    db.query(ROI).filter(ROI.camera_id == cam_id).delete()
 
     new_rois: List[ROI] = []
     now = datetime.utcnow()
     for data in rois_data:
         roi = ROI(
             roi_id=str(uuid.uuid4()),
-            camera_id=camera_id,
+            camera_id=cam_id,
             name=data.name,
             points_normalized=[{"x": p.x, "y": p.y} for p in data.points_normalized],
             is_active=data.is_active,
@@ -224,9 +239,9 @@ def bulk_replace_rois(
     for roi in new_rois:
         db.refresh(roi)
 
-    get_roi_cache().invalidate(camera_id)
+    get_roi_cache().invalidate(str(cam_id))
     logger.info(
         "Bulk replaced %d ROIs for camera_id=%s by=%s",
-        len(new_rois), camera_id, created_by,
+        len(new_rois), cam_id, created_by,
     )
     return new_rois

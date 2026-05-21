@@ -37,7 +37,7 @@ http.interceptors.response.use(
 )
 
 function getDevStreamCandidates() {
-  const portsStr = (import.meta.env.VITE_STREAM_PORTS || '8000,8010').trim()
+  const portsStr = (import.meta.env.VITE_STREAM_PORTS || '8000').trim()
   const ports = portsStr.split(',').map(p => p.trim()).filter(Boolean)
   if (typeof window === 'undefined') {
     return ports.map(p => `http://127.0.0.1:${p}/api`)
@@ -93,8 +93,8 @@ export const api = {
   // ── Cameras ───────────────────────────────────────────────────────────
   getCameras:   () => req('GET', '/cameras/'),
   getCameraMetrics: () => req('GET', '/cameras/metrics'),
-  addCamera:    (url, title) => req('POST', '/cameras/', { url, title }),
-  updateCamera: (id, url, title) => req('PUT', `/cameras/${id}`, { url, title }),
+  addCamera:    (body) => req('POST', '/cameras/', body),
+  updateCamera: (id, body) => req('PUT', `/cameras/${id}`, body),
   deleteCamera: (id) => req('DELETE', `/cameras/${id}`),
   startAll:     () => req('POST', '/cameras/start'),
   stopAll:      () => req('POST', '/cameras/stop'),
@@ -143,19 +143,32 @@ export const api = {
     ).toString()
     return req('GET', `/alerts/export${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
   },
-  exportDailyReportPdf: (report_date, use_dummy_data = false) => {
+  exportDailyReportPdf: (params = {}) => {
     const qs = new URLSearchParams(
-      Object.fromEntries(Object.entries({ report_date, use_dummy_data }).filter(([, v]) => v != null && v !== ''))
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
     ).toString()
     return req('GET', `/alerts/daily-report.pdf${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
   },
-  exportDailyReportExcel: (report_date, use_dummy_data = false) => {
+  exportDailyReportExcel: (params = {}) => {
     const qs = new URLSearchParams(
-      Object.fromEntries(Object.entries({ report_date, use_dummy_data }).filter(([, v]) => v != null && v !== ''))
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
     ).toString()
     return req('GET', `/alerts/daily-report.xlsx${qs ? '?' + qs : ''}`, null, { raw: true, responseType: 'blob' })
   },
   sendDailyReportWhatsApp: (body = {}) => req('POST', '/alerts/daily-report/whatsapp', body),
+  sendSnapshotWhatsApp: (body = {}) => req('POST', '/snapshot-whatsapp/send', body),
+
+  // ── Safety feature configs ────────────────────────────────────────────
+  getMissingPersonConfig: () => req('GET', '/missing-person/config'),
+  updateMissingPersonConfig: (body) => req('PUT', '/missing-person/config', body),
+  getCrowdAlertConfig: () => req('GET', '/crowd-alert/config'),
+  updateCrowdAlertConfig: (body) => req('PUT', '/crowd-alert/config', body),
+  getDynamicFpsConfig: () => req('GET', '/dynamic-fps/config'),
+  updateDynamicFpsConfig: (body) => req('PUT', '/dynamic-fps/config', body),
+  getDynamicFpsRecommendations: (cpu_percent) =>
+    req('GET', `/dynamic-fps/recommendations${cpu_percent != null ? `?cpu_percent=${cpu_percent}` : ''}`),
+  applyDynamicFps: (cpu_percent) =>
+    req('POST', `/dynamic-fps/apply${cpu_percent != null ? `?cpu_percent=${cpu_percent}` : ''}`),
 
   // ── ROI Zones ─────────────────────────────────────────────────────────
   getRois:         (camId, activeOnly = false) =>
@@ -177,7 +190,18 @@ export const api = {
   upsertBurglarAlarmConfig:(camId, body)=> req('PUT',    `/burglar-alarm/${camId}`, body),
   deleteBurglarAlarmConfig:(camId)      => req('DELETE', `/burglar-alarm/${camId}`),
   getBurglarAlarmStatus:   (camId)      => req('GET',    `/burglar-alarm/${camId}/status`),
+  verifyBurglarAlarmAllCameras: ()      => req('GET',    '/burglar-alarm/verify/all-cameras'),
 
+
+  // ── AI Model registry ─────────────────────────────────────────────────
+  getAiModels:    ()        => req('GET',    '/ai-models/'),
+  createAiModel:  (body)    => req('POST',   '/ai-models/', body),
+  updateAiModel:  (id, body)=> req('PUT',    `/ai-models/${id}`, body),
+  deleteAiModel:  (id)      => req('DELETE', `/ai-models/${id}`),
+
+  // ── Server file browser ───────────────────────────────────────────────
+  browseFiles: (dir = '') =>
+    req('GET', `/files/browse${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`),
 
   // ── Logs ──────────────────────────────────────────────────────────────
   getLogs:   (lines = 100) => req('GET', `/logs/?lines=${lines}`),

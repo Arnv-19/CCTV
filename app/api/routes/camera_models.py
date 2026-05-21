@@ -16,30 +16,16 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import CameraModel, User
+# from app.db.models import CameraModel, User
+from app.db.models.camera import Camera
 from app.dependencies import get_current_user, require_admin
 from app.services.camera_manager import camera_manager
-
+from app.schemas.camera_model_schemas import ModelToggle, ModelPatch, _row_dict
+from app.db.models.camera_model import CameraModel
+from app.db.models.user import User
 router = APIRouter()
 
 
-class ModelToggle(BaseModel):
-    model_name: str
-    is_enabled: bool = True
-
-
-class ModelPatch(BaseModel):
-    is_enabled: bool | None = None
-
-
-def _row_dict(r: CameraModel) -> dict:
-    return {
-        "id":         r.id,
-        "camera_id":  r.camera_id,
-        "model_name": r.model_name,
-        "is_enabled": r.is_enabled,
-        "updated_at": r.updated_at,
-    }
 
 
 @router.get("/{camera_id}")
@@ -98,7 +84,8 @@ def upsert_camera_model(
 
     # Apply model changes immediately for active camera workers.
     try:
-        if camera_id in camera_manager.threads and camera_manager.threads[camera_id].is_alive():
+        proc = camera_manager.processes.get(camera_id)
+        if proc is not None and proc.is_alive():
             camera_manager.start_camera(camera_id)
     except Exception as e:
         print(f"[CameraModels] Warning: could not restart camera {camera_id}: {e}")
@@ -137,7 +124,8 @@ def toggle_model(
 
     # Apply model changes immediately for active camera workers.
     try:
-        if camera_id in camera_manager.threads and camera_manager.threads[camera_id].is_alive():
+        proc = camera_manager.processes.get(camera_id)
+        if proc is not None and proc.is_alive():
             camera_manager.start_camera(camera_id)
     except Exception as e:
         print(f"[CameraModels] Warning: could not restart camera {camera_id}: {e}")

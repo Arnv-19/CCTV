@@ -12,7 +12,7 @@ GET    /api/alerts/export     Export filtered alerts as CSV download
 
 import csv
 import io
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -27,6 +27,7 @@ from app.db.models import Alert, User
 from app.dependencies import get_current_user
 from app.services.reporting_service import (
     build_daily_report_filename,
+    build_report_context,
     build_daily_report_rows,
     get_daily_alerts_query,
     render_daily_report_pdf,
@@ -34,69 +35,15 @@ from app.services.reporting_service import (
     save_report_artifacts,
 )
 from app.services.whatsapp_service import WhatsAppConfigError, send_documents
-
+from app.schemas.alert_schemas import (
+    AlertCreate, AlertOut, DailyReportWhatsAppRequest, _alert_dict,_now_ist_naive
+)
 router = APIRouter()
+
 _IST_TZ = ZoneInfo("Asia/Kolkata")
 
 
-def _now_ist_naive() -> datetime:
-    return datetime.now(_IST_TZ).replace(tzinfo=None)
 
-
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
-
-class AlertCreate(BaseModel):
-    camera_id:        int
-    model_name:       str
-    violation_type:   str
-    confidence_score: float
-    snapshot_path:    Optional[str] = None
-    buzzer_activated: bool = False
-
-
-class AlertOut(BaseModel):
-    id:               int
-    camera_id:        int
-    model_name:       str
-    violation_type:   str
-    confidence_score: float
-    snapshot_path:    Optional[str]
-    triggered_at:     datetime
-    buzzer_activated: bool
-    acknowledged:     bool
-    acknowledged_by:  Optional[int]
-    acknowledged_at:  Optional[datetime]
-    acknowledger_name: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
-class DailyReportWhatsAppRequest(BaseModel):
-    report_date: Optional[date] = None
-    to: Optional[str] = None
-    include_pdf: bool = True
-    include_excel: bool = True
-    use_dummy_data: bool = False
-
-
-def _alert_dict(a: Alert) -> dict:
-    return {
-        "id":               a.id,
-        "camera_id":        a.camera_id,
-        "model_name":       a.model_name,
-        "violation_type":   a.violation_type,
-        "confidence_score": round(a.confidence_score, 4),
-        "snapshot_path":    a.snapshot_path,
-        "triggered_at":     a.triggered_at,
-        "buzzer_activated": a.buzzer_activated,
-        "acknowledged":     a.acknowledged,
-        "acknowledged_by":  a.acknowledged_by,
-        "acknowledged_at":  a.acknowledged_at,
-        "acknowledger_name": a.acknowledger.username if a.acknowledger else None,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +61,63 @@ def _apply_filters(query, camera_id, model_name, date_from, date_to, acknowledge
 
 def _resolve_report_date(report_date: Optional[date]) -> date:
     return report_date or _now_ist_naive().date()
+
+
+def _date_to_start_dt(value: Optional[date]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.combine(value, time.min)
+
+
+def _date_to_end_dt(value: Optional[date]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.combine(value, time.max)
+
+
+def _normalize_date_range(date_from: Optional[date], date_to: Optional[date]) -> tuple[Optional[date], Optional[date]]:
+    if date_from and not date_to:
+        return date_from, date_from
+    if date_to and not date_from:
+        return date_to, date_to
+    return date_from, date_to
+
+
+def _load_report_alerts(
+    db: Session,
+    *,
+    report_date: Optional[date],
+    camera_id: Optional[int],
+    date_from: Optional[date],
+    date_to: Optional[date],
+):
+    date_from, date_to = _normalize_date_range(date_from, date_to)
+    resolved_date = _resolve_report_date(date_to or date_from or report_date)
+    has_filters = any(value is not None for value in (camera_id, date_from, date_to))
+
+    if has_filters:
+        alerts = (
+            _apply_filters(
+                db.query(Alert),
+                camera_id,
+                None,
+                _date_to_start_dt(date_from),
+                _date_to_end_dt(date_to),
+                None,
+            )
+            .order_by(Alert.triggered_at.asc(), Alert.camera_id.asc(), Alert.id.asc())
+            .all()
+        )
+    else:
+        alerts = get_daily_alerts_query(db, resolved_date).all()
+
+    context = build_report_context(
+        report_date=resolved_date,
+        date_from=date_from,
+        date_to=date_to,
+        total_rows=len(alerts),
+    )
+    return resolved_date, alerts, context
 
 
 # ---------------------------------------------------------------------------
@@ -170,16 +174,24 @@ def get_summary(
 def list_alerts(
     camera_id:    Optional[int]  = Query(None),
     model_name:   Optional[str]  = Query(None),
-    date_from:    Optional[datetime] = Query(None),
-    date_to:      Optional[datetime] = Query(None),
+    date_from:    Optional[date] = Query(None),
+    date_to:      Optional[date] = Query(None),
     acknowledged: Optional[bool] = Query(None),
     page:  int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
+    date_from, date_to = _normalize_date_range(date_from, date_to)
     query = db.query(Alert)
-    query = _apply_filters(query, camera_id, model_name, date_from, date_to, acknowledged)
+    query = _apply_filters(
+        query,
+        camera_id,
+        model_name,
+        _date_to_start_dt(date_from),
+        _date_to_end_dt(date_to),
+        acknowledged,
+    )
     total = query.count()
     rows  = query.order_by(Alert.triggered_at.desc()).offset((page - 1) * limit).limit(limit).all()
     return {
@@ -227,15 +239,23 @@ def acknowledge_alert(
 def export_alerts_csv(
     camera_id:    Optional[int]  = Query(None),
     model_name:   Optional[str]  = Query(None),
-    date_from:    Optional[datetime] = Query(None),
-    date_to:      Optional[datetime] = Query(None),
+    date_from:    Optional[date] = Query(None),
+    date_to:      Optional[date] = Query(None),
     acknowledged: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Stream filtered alerts as a CSV file download."""
+    date_from, date_to = _normalize_date_range(date_from, date_to)
     query = db.query(Alert)
-    query = _apply_filters(query, camera_id, model_name, date_from, date_to, acknowledged)
+    query = _apply_filters(
+        query,
+        camera_id,
+        model_name,
+        _date_to_start_dt(date_from),
+        _date_to_end_dt(date_to),
+        acknowledged,
+    )
     rows  = query.order_by(Alert.triggered_at.desc()).all()
 
     output = io.StringIO()
@@ -267,19 +287,28 @@ def export_alerts_csv(
 @router.get("/daily-report.xlsx")
 def export_daily_report_xlsx(
     report_date: Optional[date] = Query(None),
+    camera_id: Optional[int] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     use_dummy_data: bool = Query(False),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    resolved_date = _resolve_report_date(report_date)
-    alerts = get_daily_alerts_query(db, resolved_date).all()
+    resolved_date, alerts, context = _load_report_alerts(
+        db,
+        report_date=report_date,
+        camera_id=camera_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
     rows = build_daily_report_rows(
         alerts,
         resolved_date,
         include_dummy_data=use_dummy_data,
     )
-    payload = render_daily_report_xlsx(rows, resolved_date)
-    filename = build_daily_report_filename(resolved_date, "xlsx")
+    context.total_rows = len(rows)
+    payload = render_daily_report_xlsx(rows, resolved_date, context)
+    filename = build_daily_report_filename(resolved_date, "xlsx") if not (date_from or date_to) else f"daily_alert_report_{context.filename_date_label}.xlsx"
     return StreamingResponse(
         io.BytesIO(payload),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -290,19 +319,28 @@ def export_daily_report_xlsx(
 @router.get("/daily-report.pdf")
 def export_daily_report_pdf(
     report_date: Optional[date] = Query(None),
+    camera_id: Optional[int] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
     use_dummy_data: bool = Query(False),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    resolved_date = _resolve_report_date(report_date)
-    alerts = get_daily_alerts_query(db, resolved_date).all()
+    resolved_date, alerts, context = _load_report_alerts(
+        db,
+        report_date=report_date,
+        camera_id=camera_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
     rows = build_daily_report_rows(
         alerts,
         resolved_date,
         include_dummy_data=use_dummy_data,
     )
-    payload = render_daily_report_pdf(rows, resolved_date)
-    filename = build_daily_report_filename(resolved_date, "pdf")
+    context.total_rows = len(rows)
+    payload = render_daily_report_pdf(rows, resolved_date, context)
+    filename = build_daily_report_filename(resolved_date, "pdf") if not (date_from or date_to) else f"daily_alert_report_{context.filename_date_label}.pdf"
     return StreamingResponse(
         io.BytesIO(payload),
         media_type="application/pdf",
@@ -316,8 +354,13 @@ def send_daily_report_whatsapp(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    resolved_date = _resolve_report_date(body.report_date)
-    alerts = get_daily_alerts_query(db, resolved_date).all()
+    resolved_date, alerts, context = _load_report_alerts(
+        db,
+        report_date=body.report_date,
+        camera_id=body.camera_id,
+        date_from=body.date_from,
+        date_to=body.date_to,
+    )
     if not alerts and not body.use_dummy_data:
         raise HTTPException(400, f"No alert data found in DB for {resolved_date.isoformat()}.")
     rows = build_daily_report_rows(
@@ -325,10 +368,11 @@ def send_daily_report_whatsapp(
         resolved_date,
         include_dummy_data=body.use_dummy_data,
     )
+    context.total_rows = len(rows)
     if not body.include_pdf and not body.include_excel:
         raise HTTPException(400, "Select at least one file type to send.")
 
-    artifacts = save_report_artifacts(rows, resolved_date, "violations/reports")
+    artifacts = save_report_artifacts(rows, resolved_date, "violations/reports", context)
     files_to_send = []
     if body.include_pdf:
         files_to_send.append(artifacts["pdf"])

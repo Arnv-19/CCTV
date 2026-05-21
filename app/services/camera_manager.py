@@ -1,285 +1,105 @@
 """
 app/services/camera_manager.py
 --------------------------------
-Singleton service that owns all camera threads and shared frame data.
+Singleton that owns all camera processes and shared frame data.
 
 Lifecycle:
-  initialize()  — called once at FastAPI startup (lifespan)
-                  opens serial port, preloads YOLO model
-  start_all()   — spawns one thread per configured camera + AlertWriter thread
-  stop_all()    — sets stop_event on every thread, joins with 2s timeout
-  shutdown()    — stop_all() + close serial (called on app shutdown)
+  initialize()  — FastAPI startup: opens serial port
+  start_all()   — spawns ingestion processes + result handler threads + inference servers
+  stop_all()    — signals everything to stop, joins with timeouts
+  shutdown()    — stop_all() + close serial
 
-Thread model:
-  Each camera runs camera_worker.camera_loop() in a daemon thread.
-  The thread writes JPEG bytes to frame_dict[cam_id] after every frame.
-  The MJPEG streaming endpoint reads frame_dict[cam_id] asynchronously.
-  A single threading.Lock protects both frame_dict and stats_dict.
+Architecture (shared-inference):
+  ingestion_worker   (mp.Process, 1 per camera) — FFmpeg/webcam → frame_queue
+  inference_server   (mp.Process, 1 per model)  — batch GPU predict → result_queues
+  result_handler     (threading.Thread, 1 per camera) — alarm/MJPEG/stats
 
-AlertWriter:
-  A single background thread reads violation dicts from alert_queue and
-  writes Alert rows to PostgreSQL.  Camera threads never touch the DB
-  directly — they only put() to the queue, keeping inference latency low.
-
-The singleton instance `camera_manager` is imported directly by route modules.
+DB is the source of truth for cameras, models, buzzers.
+config.yaml owns only transport timing (cooldown, snapshot interval, batch size).
 """
 
 import threading
+import multiprocessing as mp
 import sys
 import os
 import time
-from datetime import datetime
 from pathlib import Path
-from queue import Queue, Empty
-from zoneinfo import ZoneInfo
+
 import psutil
 
-# Make project root importable from this sub-package
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.config import get_config
-from detector import load_model, load_class_names
 from alarm import init_serial, close_serial
-from camera_worker import camera_loop
+from camera_worker import ingestion_worker, result_handler_worker
+from inference_server import inference_server_loop
 from app.services.burglar_alarm_service import fetch_burglar_config
-
-# Sentinel value pushed to alert_queue to signal AlertWriter to stop
-_STOP_SENTINEL = None
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_IST_TZ = ZoneInfo("Asia/Kolkata")
-
-
-def _now_ist_naive() -> datetime:
-    """Return current IST time as a naive datetime for DB DateTime columns."""
-    return datetime.now(_IST_TZ).replace(tzinfo=None)
-
-
-def _resolve_local_path(path_like: str) -> Path:
-    p = Path(path_like)
-    if p.is_absolute():
-        return p
-    return _PROJECT_ROOT / p
+from app.services.camera_db_helpers import (
+    load_cameras_from_db,
+    load_model_config_for_camera,
+    fetch_buzzers_for_camera,
+    fetch_enabled_models_for_camera,
+    _resolve_local_path,
+)
+from app.services.alert_writer import alert_writer_loop, STOP_SENTINEL
+from app.controllers.feature_config_controller import get_camera_feature_config
+from app.controllers.dynamic_fps_controller import decide_camera_fps
 
 
-def _is_device_or_network_source(url) -> bool:
+def _is_network_source(url) -> bool:
     """True for webcam indices or network stream URLs."""
     if isinstance(url, int):
         return True
     if not isinstance(url, str):
         return False
     s = url.strip()
-    if s.isdigit():
-        return True
-    return s.startswith(("rtsp://", "rtmp://", "http://", "https://", "udp://", "tcp://"))
-
-
-def _fetch_enabled_models_for_camera(cam_id: int) -> list | None:
-    """
-    Return the list of enabled model names for a camera from the DB.
-
-        Returns None when no rows exist, which means "all models enabled" (backward-compat default).
-        When rows exist, they are treated as per-model overrides:
-            - known models default to enabled unless explicitly disabled
-            - explicitly enabled custom models are included
-    """
-    try:
-        from app.db.database import SessionLocal, ensure_database_connected
-        from app.db.models import CameraModel
-
-        ensure_database_connected()
-
-        with SessionLocal() as db:
-            rows = db.query(CameraModel).filter(CameraModel.camera_id == cam_id).all()
-            if not rows:
-                return None  # no config recorded → let all models run
-
-            # Defaults for built-in model toggles shown in UI.
-            known_defaults_enabled = {
-                "helmet_detection",
-                "gloves_detection",
-                "vest_detection",
-                "fire_detection",
-                "glasses_detection",
-                "mask_detection",
-            }
-
-            enabled = set(known_defaults_enabled)
-            for r in rows:
-                if r.is_enabled:
-                    enabled.add(r.model_name)
-                else:
-                    enabled.discard(r.model_name)
-
-            enabled = sorted(enabled)
-            print(f"[CameraManager] Camera {cam_id} enabled models: {enabled}")
-            return enabled
-    except Exception as e:
-        print(f"[CameraManager] Warning: could not fetch models for cam {cam_id}: {e}")
-        return None
-
-
-def _fetch_buzzers_for_camera(cam_id: int) -> list:
-    """
-    Query the DB for all active buzzers assigned to *cam_id*.
-
-    Returns a list of plain dicts compatible with camera_worker.fire_buzzers().
-    Returns [] if the DB is unavailable or no buzzers are assigned.
-    """
-    try:
-        from app.db.database import SessionLocal, ensure_database_connected
-        from app.db.models import CameraBuzzer
-
-        ensure_database_connected()
-
-        with SessionLocal() as db:
-            rows = (
-                db.query(CameraBuzzer)
-                .filter(CameraBuzzer.camera_id == cam_id)
-                .all()
-            )
-            buzzers = []
-            for cb in rows:
-                b = cb.buzzer
-                if b:
-                    buzzers.append({
-                        "id":         b.id,
-                        "protocol":   b.protocol,
-                        "device_id":  b.device_id,
-                        "ip_address": b.ip_address,
-                        "port":       b.port,
-                        "gpio_pin":   b.gpio_pin,
-                        "is_active":  b.is_active,
-                    })
-            return buzzers
-    except Exception as e:
-        print(f"[CameraManager] Warning: could not fetch buzzers for cam {cam_id}: {e}")
-        return []
-
-
-def _alert_writer_loop(queue: Queue):
-    """
-    Background thread: drains alert_queue and persists each item as an Alert row.
-
-    Each item is a dict with keys:
-      camera_id, model_name, violation_type, confidence_score,
-      snapshot_path, buzzer_activated
-
-    Pushes _STOP_SENTINEL (None) to terminate.
-    """
-    try:
-        from app.db.database import SessionLocal, ensure_database_connected
-        from app.db.models import Alert,BurglarAlarmEvent
-    except Exception as e:
-        print(f"[AlertWriter] Import error — DB writes disabled: {e}")
-        return
-
-    while True:
-        try:
-            item = queue.get(timeout=1)
-        except Empty:
-            continue
-
-        if item is _STOP_SENTINEL:
-            break
-
-        try:
-            ensure_database_connected()
-            with SessionLocal() as db:
-                # alert = Alert(
-                #     camera_id        = item["camera_id"],
-                #     model_name       = item.get("model_name", "helmet_detection"),
-                #     violation_type   = item.get("violation_type", "no_helmet"),
-                #     confidence_score = item.get("confidence_score", 0.0),
-                #     snapshot_path    = item.get("snapshot_path"),
-                #     triggered_at     = datetime.utcnow(),
-                #     buzzer_activated = item.get("buzzer_activated", False),
-                # )
-                # db.add(alert)
-                if item.get("model_name") == "burglar_alarm":
-                    # ── Burglar alarm event → dedicated table ──────────────
-                    event = BurglarAlarmEvent(
-                        camera_id           = item["camera_id"],
-                        zone_id             = item.get("zone_id"),
-                        confidence_score    = item.get("confidence_score", 0.0),
-                        snapshot_path       = item.get("snapshot_path"),
-                        buzzer_activated    = item.get("buzzer_activated", False),
-                        tracker_initialized = item.get("tracker_initialized", False),
-                        triggered_at        = _now_ist_naive(),
-                        # Person bounding box
-                        bbox_x1      = item.get("bbox_x1"),
-                        bbox_y1      = item.get("bbox_y1"),
-                        bbox_x2      = item.get("bbox_x2"),
-                        bbox_y2      = item.get("bbox_y2"),
-                        frame_width  = item.get("frame_width"),
-                        frame_height = item.get("frame_height"),
-                    )
-                    db.add(event)
-                else:
-                    # ── PPE / fire / other violation → alerts table ────────
-                    alert = Alert(
-                        camera_id        = item["camera_id"],
-                        model_name       = item.get("model_name", "helmet_detection"),
-                        violation_type   = item.get("violation_type", "no_helmet"),
-                        confidence_score = item.get("confidence_score", 0.0),
-                        snapshot_path    = item.get("snapshot_path"),
-                        triggered_at     = _now_ist_naive(),
-                        buzzer_activated = item.get("buzzer_activated", False),
-                    )
-                    db.add(alert)
-                db.commit()
-        except Exception as e:
-            attempts = int(item.get("_db_write_attempts", 0)) + 1
-            item["_db_write_attempts"] = attempts
-            print(
-                f"[AlertWriter] Failed to write alert to DB "
-                f"(attempt {attempts}/5, camera={item.get('camera_id')}, "
-                f"type={item.get('violation_type')}): {e}"
-            )
-            if attempts < 5:
-                time.sleep(2)
-                queue.put(item)
-            else:
-                print(f"[AlertWriter] Dropping alert after 5 DB write failures: {item}")
+    return s.isdigit() or s.startswith(
+        ("rtsp://", "rtmp://", "http://", "https://", "udp://", "tcp://")
+    )
 
 
 class CameraManager:
     def __init__(self):
-        # Latest JPEG frame bytes per camera: {cam_id: bytes}
-        self.frame_dict: dict[int, bytes] = {}
-        # Live stats per camera: {cam_id: {status, fps, violations, frames}}
-        self.stats_dict: dict[int, dict] = {}
-        # Shared lock protecting both frame_dict and stats_dict
-        self.lock = threading.Lock()
-        # Active camera threads: {cam_id: Thread}
-        self.threads: dict[int, threading.Thread] = {}
-        # Per-camera stop signals: {cam_id: Event}
-        self.stop_events: dict[int, threading.Event] = {}
-        # Shared YOLO model (loaded once, reused across all camera threads)
-        self.model = None
-        self.model_path_loaded: str | None = None
-        # Dedicated person model used by burglar alarm tracking
-        self.person_model = None
-        self.person_model_path_loaded: str | None = None
-        # Optional second model for gloves/bare-hands detection
-        self.gloves_model = None
-        self.gloves_model_path_loaded: str | None = None
-        self.helmet_class: str | None = None
-        self.no_helmet_class: str | None = None
+        self._mp_manager = mp.Manager()
+
+        # frame_dict is written only by result_handler_worker threads (main process),
+        # so a plain dict avoids Manager IPC on every frame — fixes event-loop blocking.
+        self.frame_dict  = {}                         # {cam_id: jpeg_bytes}
+        self.stats_dict  = self._mp_manager.dict()   # {cam_id: {status, fps, ...}} — written by subprocesses
+        self.lock        = self._mp_manager.Lock()
+
+        # Per-camera ingestion processes
+        self.processes:   dict[int, mp.Process]       = {}
+        self.stop_events: dict[int, mp.Event]         = {}
+
+        # Shared-inference architecture
+        self.frame_queues:             dict = {}   # {model_path: mp.Queue}
+        self.result_queues             = self._mp_manager.dict()   # {cam_id: mp.Queue}
+        self._inference_servers:       dict = {}   # {model_path: mp.Process}
+        self._inference_stop_events:   dict = {}   # {model_path: mp.Event}
+        self._cam_model_map:           dict = {}   # {cam_id: model_path}
+
+        # Result handler threads (in main process)
+        self._result_handler_threads:     dict[int, threading.Thread] = {}
+        self._result_handler_stop_events: dict[int, threading.Event]  = {}
+
+        # Alert writer
+        self.alert_queue             = mp.Queue()
+        self._alert_writer_thread: threading.Thread | None = None
+
+        # Fallback class lists (populated from config.yaml when DB has no assignment)
         self.violation_classes: list = []
-        self.safe_classes: list = []
+        self.safe_classes:      list = []
+        self.helmet_class:      str | None = None
+        self.no_helmet_class:   str | None = None
+
         self.runtime_fallbacks = {
-            "model_fallback": False,
-            "source_fallback": False,
-            "active_model_path": None,
-            "requested_model_path": None,
+            "model_fallback": False, "source_fallback": False,
+            "active_model_path": None, "requested_model_path": None,
         }
-        # True once start_all() has been called
         self._running = False
 
-        # Queue shared by all camera threads → AlertWriter
-        self.alert_queue: Queue = Queue()
-        # AlertWriter background thread
-        self._alert_writer_thread: threading.Thread | None = None
+        # Resource metrics
         self._process = psutil.Process(os.getpid())
         self._process_cpu_sample = {
             "cpu_time": sum(self._process.cpu_times()[:2]),
@@ -288,382 +108,623 @@ class CameraManager:
         self._thread_cpu_samples: dict[int, dict] = {}
         self._cpu_percent_primed = False
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+    # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     def initialize(self):
-        """
-        Called at FastAPI startup.
-        Opens serial port and preloads the YOLO model so the first
-        /cameras/start request responds immediately.
-        """
+        """Called at FastAPI startup. Opens serial port."""
         init_serial()
-        preload = os.getenv("PRELOAD_MODEL_ON_STARTUP", "0").strip().lower() in {"1", "true", "yes", "on"}
-        if not preload:
-            print("[CameraManager] Skipping model preload at startup (lazy-load on /cameras/start).")
-            return
-
-        cfg = get_config()
-        try:
-            model_path = cfg["model_path"]
-            model_path_abs = _resolve_local_path(model_path) if model_path else model_path
-            self.model = load_model(str(model_path_abs) if model_path_abs is not None else model_path)
-            self.model_path_loaded = cfg["model_path"]
-            class_file_abs = _resolve_local_path(cfg["class_file"]) if cfg.get("class_file") else cfg.get("class_file")
-            _, self.helmet_class, self.no_helmet_class, self.violation_classes, self.safe_classes = load_class_names(str(class_file_abs))
-            print("[CameraManager] Model loaded successfully.")
-        except Exception as e:
-            # Non-fatal: model will be loaded lazily on start_all()
-            print(f"[CameraManager] Warning: could not preload model: {e}")
+        print("[CameraManager] Initialized — call /api/cameras/start to begin detection.")
 
     def shutdown(self):
-        """Stop all cameras and close serial on app shutdown."""
+        """Stop all cameras, close serial, clean up the mp.Manager."""
         self.stop_all()
         close_serial()
+        try:
+            self.alert_queue.close()
+            self._mp_manager.shutdown()
+        except Exception:
+            pass
 
-    # ------------------------------------------------------------------
-    # Start / stop
-    # ------------------------------------------------------------------
+    # ── Start / stop all ──────────────────────────────────────────────────────
 
     def start_all(self):
         """
-        Start detection threads for all cameras listed in config.yaml,
-        plus the AlertWriter background thread for non-blocking DB logging.
-        Loads the YOLO model if it wasn't preloaded at startup.
-        Raises RuntimeError if the model cannot be loaded.
+        Start inference servers + per-camera workers for all active cameras.
+        Cameras and models come from DB; alarm timing from config.yaml.
         No-op if already running.
         """
         if self._running:
-            # If threads are still alive, genuinely running — skip.
-            if any(t.is_alive() for t in self.threads.values()):
+            if any(p.is_alive() for p in self.processes.values()):
                 return
-            # All threads died without an explicit stop() (e.g. webcam error).
-            # Clean up orphaned state so we can restart cleanly.
-            print("[CameraManager] Threads died without explicit stop — resetting state for restart.")
-            self.threads.clear()
-            self.stop_events.clear()
-            with self.lock:
-                self.frame_dict.clear()
-                self.stats_dict.clear()
-            self._running = False
+            # All processes died unexpectedly — reset and restart cleanly
+            print("[CameraManager] Processes died without stop — resetting for restart.")
+            self._reset_state()
 
         cfg = get_config()
 
-        configured_model_path = cfg.get("model_path", "")
-        selected_model_path = configured_model_path
-        model_fallback = False
-        configured_abs = _resolve_local_path(configured_model_path) if configured_model_path else None
-
-        if configured_model_path and configured_abs and not configured_abs.exists():
-            fallback_abs = _resolve_local_path("yolov8n.pt")
-            if fallback_abs.exists():
-                selected_model_path = "yolov8n.pt"
-                model_fallback = True
-                print(
-                    f"[CameraManager] Warning: model '{configured_model_path}' not found. "
-                    "Falling back to 'yolov8n.pt'."
-                )
-
-        self.runtime_fallbacks["model_fallback"] = model_fallback
-        self.runtime_fallbacks["requested_model_path"] = configured_model_path
-        self.runtime_fallbacks["active_model_path"] = selected_model_path
-
-        # Load/reload main model if missing or config changed.
-        if self.model is None or self.model_path_loaded != selected_model_path:
-            try:
-                # Resolve relative model paths to absolute paths inside the project so
-                # loading works regardless of the current working directory.
-                model_path_to_load = selected_model_path
-                if selected_model_path and not Path(selected_model_path).is_absolute():
-                    model_path_to_load = str(_resolve_local_path(selected_model_path))
-                self.model = load_model(model_path_to_load)
-                self.model_path_loaded = selected_model_path
-                class_file_abs = _resolve_local_path(cfg["class_file"]) if cfg.get("class_file") else cfg.get("class_file")
-                _, self.helmet_class, self.no_helmet_class, self.violation_classes, self.safe_classes = load_class_names(str(class_file_abs))
-            except Exception as e:
-                raise RuntimeError(f"Failed to load model: {e}")
-        
-        # Load dedicated person model for burglar alarm detection.
-        person_model_path = cfg.get("person_model_path", "weights/person_model.pt")
-        person_abs = _resolve_local_path(person_model_path) if person_model_path else None
-        if person_abs and person_abs.exists():
-            if self.person_model is None or self.person_model_path_loaded != person_model_path:
-                try:
-                    self.person_model = load_model(str(person_abs))
-                    self.person_model_path_loaded = person_model_path
-                    print(f"[CameraManager] Person model loaded: {person_model_path}")
-                except Exception as e:
-                    print(f"[CameraManager] Warning: could not load person model '{person_model_path}': {e}")
-                    self.person_model = None
-                    self.person_model_path_loaded = None
-        else:
-            print(f"[CameraManager] Warning: person model not found: {person_model_path}")
-            self.person_model = None
-            self.person_model_path_loaded = None
-
-        # Load optional gloves model if configured and present.
-        gloves_model_path = cfg.get("gloves_model_path", "")
-        if gloves_model_path:
-            gloves_abs = _resolve_local_path(gloves_model_path)
-            selected_model_abs = _resolve_local_path(selected_model_path) if selected_model_path else None
-            if selected_model_abs and gloves_abs.resolve() == selected_model_abs.resolve():
-                self.gloves_model = self.model
-                self.gloves_model_path_loaded = gloves_model_path
-                print("[CameraManager] Gloves model reusing main PPE model.")
-            elif gloves_abs.exists() and self.gloves_model_path_loaded != gloves_model_path:
-                try:
-                    # Load gloves model using absolute path to avoid CWD issues.
-                    self.gloves_model = load_model(str(gloves_abs))
-                    self.gloves_model_path_loaded = gloves_model_path
-                    print(f"[CameraManager] Gloves model loaded: {gloves_model_path}")
-                except Exception as e:
-                    print(f"[CameraManager] Warning: could not load gloves model '{gloves_model_path}': {e}")
-                    self.gloves_model = None
-            elif not gloves_abs.exists():
-                print(f"[CameraManager] Warning: gloves model not found: {gloves_model_path}")
-
-        # Start the AlertWriter thread once for all cameras
-        self._start_alert_writer()
-
-        # Read all alarm/detection settings from config once
-        feeds             = cfg.get("camera_feeds", [])
-        use_wifi          = cfg.get("use_wifi", False)
-        esp_ip            = cfg.get("esp_ip", None)
-        alarm_transport   = cfg.get("alarm_transport", None)
-        alarm_http_token  = cfg.get("alarm_http_token", "")
-        mqtt_broker       = cfg.get("mqtt_broker", "")
-        mqtt_port         = cfg.get("mqtt_port", 1883)
-        mqtt_username     = cfg.get("mqtt_username", "")
-        mqtt_password     = cfg.get("mqtt_password", "")
-        mqtt_topic        = cfg.get("mqtt_topic", "skycctv/alarm")
-        mqtt_client_id    = cfg.get("mqtt_client_id", "skycctv-ai")
-        mqtt_qos          = cfg.get("mqtt_qos", 1)
-        mqtt_retain       = cfg.get("mqtt_retain", False)
+        # Transport / timing always from config.yaml
         cooldown          = cfg.get("alarm_cooldown_sec", 5)
         snapshot_cooldown = cfg.get("snapshot_cooldown_sec", 120)
-        threshold         = cfg.get("confidence_threshold", 0.25)
-        detection_width   = cfg.get("detection_frame_width", 640)
-        detection_height  = cfg.get("detection_frame_height", 480)
         yolo_imgsz        = cfg.get("yolo_imgsz", 640)
+        inference_fps     = cfg.get("inference_fps", 4)
+        batch_size        = cfg.get("inference_batch_size", 8)
         burglar_test_sound = cfg.get("burglar_test_sound", False)
 
+        # Build per-camera config list from DB; fall back to config.yaml if empty
+        camera_configs = self._build_camera_configs(cfg)
+        if cfg.get("dynamic_fps", {}).get("enabled"):
+            dyn_settings = cfg.get("dynamic_fps", {})
+            for cam_cfg in camera_configs:
+                cam_cfg["ingestion_fps"] = decide_camera_fps(
+                    camera_count=len(camera_configs),
+                    camera_id=cam_cfg["id"],
+                    requested_fps=cam_cfg.get("ingestion_fps"),
+                    settings=dyn_settings,
+                )
 
-        started_any = False
-        for cam_id, url in enumerate(feeds):
-            if url is None or (isinstance(url, str) and not url.strip()):
-                continue
-
-            # If a local media path is configured and missing, skip it.
-            if not _is_device_or_network_source(url):
-                source_abs = _resolve_local_path(str(url))
-                if not source_abs.exists():
-                    print(f"[CameraManager] Warning: source not found for camera {cam_id}: {url}")
-                    with self.lock:
-                        self.stats_dict[cam_id] = {
-                            "status": "error",
-                            "fps": 0,
-                            "violations": 0,
-                            "frames": 0,
-                        }
-                    continue
-
-            self._start_camera(
-                cam_id, url, threshold, cooldown, use_wifi, esp_ip,
-                alarm_transport, alarm_http_token,
-                mqtt_broker, mqtt_port, mqtt_username, mqtt_password,
-                mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
-                violation_classes=self.violation_classes,
-                safe_classes=self.safe_classes,
-                gloves_model=self.gloves_model,
-                person_model=self.person_model,
-                snapshot_cooldown=snapshot_cooldown,
-                detection_width=detection_width,
-                detection_height=detection_height,
-                yolo_imgsz=yolo_imgsz,
-                burglar_test_sound=burglar_test_sound,
-            )
-            started_any = True
-
-        # If no configured source can be started, fall back to local webcam 0.
-        if not started_any:
-            self.runtime_fallbacks["source_fallback"] = True
-            print("[CameraManager] Warning: no valid camera sources found. Falling back to webcam 0.")
-            self._start_camera(
-                0, 0, threshold, cooldown, use_wifi, esp_ip,
-                alarm_transport, alarm_http_token,
-                mqtt_broker, mqtt_port, mqtt_username, mqtt_password,
-                mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
-                violation_classes=self.violation_classes,
-                safe_classes=self.safe_classes,
-                gloves_model=self.gloves_model,
-                person_model=self.person_model,
-                snapshot_cooldown=snapshot_cooldown,
-                detection_width=detection_width,
-                detection_height=detection_height,
-                yolo_imgsz=yolo_imgsz,
-                burglar_test_sound=burglar_test_sound,
-            )
-        else:
-            self.runtime_fallbacks["source_fallback"] = False
+        self._start_alert_writer()
+        self._launch_inference_servers(camera_configs, batch_size, inference_fps, yolo_imgsz)
+        self._launch_camera_workers(
+            camera_configs, cooldown, snapshot_cooldown, yolo_imgsz, burglar_test_sound, inference_fps
+        )
 
         self._running = True
 
     def stop_all(self):
-        """Signal all camera threads to stop, then stop the AlertWriter."""
-        for event in self.stop_events.values():
-            event.set()
-        for t in self.threads.values():
-            t.join(timeout=2)
-        self.threads.clear()
+        """Stop all ingestion processes, result handler threads, inference servers."""
+        # 1. Ingestion processes
+        for ev in self.stop_events.values():
+            ev.set()
+        for proc in self.processes.values():
+            proc.join(timeout=3)
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=2)
+                if proc.is_alive():
+                    proc.kill()
+        self.processes.clear()
         self.stop_events.clear()
-        with self.lock:
-            self.frame_dict.clear()
-            self.stats_dict.clear()
+
+        # 2. Result handler threads
+        for ev in self._result_handler_stop_events.values():
+            ev.set()
+        for t in self._result_handler_threads.values():
+            t.join(timeout=2)
+        self._result_handler_threads.clear()
+        self._result_handler_stop_events.clear()
+
+        # 3. Inference server processes
+        for mk, srv in list(self._inference_servers.items()):
+            if srv is not None and srv.is_alive():
+                stop_ev = self._inference_stop_events.get(mk)
+                if stop_ev:
+                    stop_ev.set()
+                fq = self.frame_queues.get(mk)
+                if fq:
+                    try:
+                        fq.put_nowait(None)   # stop sentinel
+                    except Exception:
+                        pass
+                srv.join(timeout=5)
+                if srv.is_alive():
+                    srv.terminate()
+                    srv.join(timeout=2)
+        self._inference_servers.clear()
+        self._inference_stop_events.clear()
+        self.frame_queues.clear()
+        self._cam_model_map.clear()
+        self.result_queues.clear()
+
+        self.frame_dict.clear()
+        self.stats_dict.clear()
         self._thread_cpu_samples.clear()
         self._running = False
         self._stop_alert_writer()
 
+    # ── Single-camera start / stop ─────────────────────────────────────────────
+
     def start_camera(self, cam_id: int):
         """
-        Start (or restart) a single camera by its index in config.yaml.
-        Reads fresh config so settings updated via the API are picked up.
-        Ensures the AlertWriter is running (in case cameras were stopped).
+        Start (or restart) one camera by its DB id.
+        Reads fresh config from DB; falls back to config.yaml when not found.
         """
         cfg = get_config()
-        feeds = cfg.get("camera_feeds", [])
-        if cam_id >= len(feeds):
-            raise ValueError(f"Camera {cam_id} not in config")
-        url = feeds[cam_id]
 
-        # Make sure alert writer is alive
+        # Camera source from DB
+        db_cams = load_cameras_from_db()
+        db_cam  = next((c for c in db_cams if c["id"] == cam_id), None)
+
+        if db_cam:
+            url              = db_cam["stream_url"]
+            ingestion_fps    = db_cam["ingestion_fps"]
+            detection_width  = db_cam["detection_width"]
+            detection_height = db_cam["detection_height"]
+        else:
+            feeds = cfg.get("camera_feeds", [])
+            if cam_id >= len(feeds):
+                raise ValueError(f"Camera {cam_id} not found in DB or config")
+            url              = feeds[cam_id]
+            ingestion_fps    = cfg.get("ingestion_fps", 4)
+            detection_width  = cfg.get("detection_frame_width", 640)
+            detection_height = cfg.get("detection_frame_height", 480)
+
+        if cfg.get("dynamic_fps", {}).get("enabled"):
+            active_count = len(db_cams) if db_cams else max(1, len(cfg.get("camera_feeds", [])))
+            ingestion_fps = decide_camera_fps(
+                camera_count=active_count,
+                camera_id=cam_id,
+                requested_fps=ingestion_fps,
+                settings=cfg.get("dynamic_fps", {}),
+            )
+
+        # Model config from DB
+        model_cfg = load_model_config_for_camera(cam_id)
+        if model_cfg:
+            threshold         = model_cfg["confidence_threshold"]
+            violation_classes = model_cfg["violation_classes"]
+            safe_classes      = model_cfg["safe_classes"]
+        else:
+            threshold         = cfg.get("confidence_threshold", 0.25)
+            violation_classes = self.violation_classes
+            safe_classes      = self.safe_classes
+
         self._start_alert_writer()
 
-        self._start_camera(
-            cam_id, url,
-            cfg.get("confidence_threshold", 0.25),
-            cfg.get("alarm_cooldown_sec", 5),
-            cfg.get("use_wifi", False),
-            cfg.get("esp_ip", None),
-            cfg.get("alarm_transport", None),
-            cfg.get("alarm_http_token", ""),
-            cfg.get("mqtt_broker", ""),
-            cfg.get("mqtt_port", 1883),
-            cfg.get("mqtt_username", ""),
-            cfg.get("mqtt_password", ""),
-            cfg.get("mqtt_topic", "skycctv/alarm"),
-            cfg.get("mqtt_client_id", "skycctv-ai"),
-            cfg.get("mqtt_qos", 1),
-            cfg.get("mqtt_retain", False),
-            violation_classes=self.violation_classes,
-            safe_classes=self.safe_classes,
-            gloves_model=self.gloves_model,
-            enabled_models=_fetch_enabled_models_for_camera(cam_id),
-            snapshot_cooldown=cfg.get("snapshot_cooldown_sec", 120),
-            detection_width=cfg.get("detection_frame_width", 640),
-            detection_height=cfg.get("detection_frame_height", 480),
-            yolo_imgsz=cfg.get("yolo_imgsz", 640),
-             
+        if cam_id not in self.result_queues:
+            self.result_queues[cam_id] = self._mp_manager.Queue(maxsize=4)
 
+        cam_mk          = self._cam_model_map.get(cam_id) or next(iter(self.frame_queues), None)
+        cam_frame_queue = self.frame_queues.get(cam_mk) if cam_mk else None
+
+        self._start_camera_worker(
+            cam_id=cam_id,
+            url=url,
+            threshold=threshold,
+            cooldown=cfg.get("alarm_cooldown_sec", 5),
+            snapshot_cooldown=cfg.get("snapshot_cooldown_sec", 120),
+            violation_classes=violation_classes,
+            safe_classes=safe_classes,
+            detection_width=detection_width,
+            detection_height=detection_height,
+            yolo_imgsz=cfg.get("yolo_imgsz", 640),
+            ingestion_fps=ingestion_fps,
+            inference_fps=cfg.get("inference_fps", 4),
+            burglar_test_sound=cfg.get("burglar_test_sound", False),
+            frame_queue=cam_frame_queue,
         )
 
     def stop_camera(self, cam_id: int):
-        """Signal a single camera thread to stop and wait for it to exit."""
+        """Stop one camera's ingestion process and result handler thread."""
         if cam_id in self.stop_events:
             self.stop_events[cam_id].set()
-            self.threads[cam_id].join(timeout=2)
+            proc = self.processes.get(cam_id)
+            if proc is not None:
+                proc.join(timeout=3)
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join(timeout=2)
+                    if proc.is_alive():
+                        proc.kill()
             del self.stop_events[cam_id]
-            del self.threads[cam_id]
+            self.processes.pop(cam_id, None)
+
+        rh_ev = self._result_handler_stop_events.pop(cam_id, None)
+        if rh_ev:
+            rh_ev.set()
+        rh_t = self._result_handler_threads.pop(cam_id, None)
+        if rh_t:
+            rh_t.join(timeout=2)
+
         self._thread_cpu_samples.pop(cam_id, None)
 
-    def _start_alert_writer(self):
-        """Start the AlertWriter background thread if it is not already running."""
-        if (
-            self._alert_writer_thread is not None
-            and self._alert_writer_thread.is_alive()
-        ):
-            return
-        self._alert_writer_thread = threading.Thread(
-            target=_alert_writer_loop,
-            args=(self.alert_queue,),
-            daemon=True,
-            name="AlertWriter",
-        )
-        self._alert_writer_thread.start()
-        print("[CameraManager] AlertWriter thread started.")
+    # ── Data accessors ─────────────────────────────────────────────────────────
 
-    def _stop_alert_writer(self):
-        """Send sentinel to AlertWriter and wait for it to drain and exit."""
-        if (
-            self._alert_writer_thread is not None
-            and self._alert_writer_thread.is_alive()
-        ):
-            self.alert_queue.put(_STOP_SENTINEL)
-            self._alert_writer_thread.join(timeout=5)
-        self._alert_writer_thread = None
+    def get_latest_frame(self, cam_id: int) -> bytes | None:
+        return self.frame_dict.get(cam_id)
 
-    def _start_camera(
+    def get_stats(self) -> dict:
+        with self.lock:
+            return dict(self.stats_dict)
+
+    def is_running(self) -> bool:
+        return self._running
+
+    def get_camera_statuses(self) -> list:
+        """
+        Return per-camera status merged with live process state.
+        Reads from DB; falls back to config.yaml when cameras table is empty.
+        """
+        db_cams = load_cameras_from_db()
+        with self.lock:
+            stats_snap = {k: dict(v) for k, v in self.stats_dict.items()}
+
+        if db_cams:
+            return [
+                {
+                    "id":        cam["id"],
+                    "url":       cam["stream_url"],
+                    "title":     cam["name"],
+                    "active":    self._is_alive(cam["id"]),
+                    **self._cam_stats(cam["id"], stats_snap),
+                }
+                for cam in db_cams
+            ]
+
+        # Fallback: config.yaml
+        cfg    = get_config()
+        feeds  = cfg.get("camera_feeds", [])
+        titles = cfg.get("camera_titles", [])
+        return [
+            {
+                "id":        i,
+                "url":       url,
+                "title":     titles[i] if i < len(titles) else f"Camera {i}",
+                "active":    self._is_alive(i),
+                **self._cam_stats(i, stats_snap),
+            }
+            for i, url in enumerate(feeds)
+        ]
+
+    def get_resource_metrics(self) -> dict:
+        """Return system + process resource usage."""
+        now           = time.time()
+        logical_cores = psutil.cpu_count(logical=True) or 1
+        sys_mem       = psutil.virtual_memory()
+
+        if not self._cpu_percent_primed:
+            psutil.cpu_percent(interval=None)
+            self._cpu_percent_primed = True
+        sys_cpu = round(psutil.cpu_percent(interval=None), 1)
+
+        proc_times  = self._process.cpu_times()
+        proc_cpu_t  = proc_times.user + proc_times.system
+        prev        = self._process_cpu_sample
+        elapsed     = max(now - prev["sample_at"], 1e-6)
+        proc_cpu_sc = max(0.0, (proc_cpu_t - prev["cpu_time"]) / elapsed * 100.0)
+        self._process_cpu_sample = {"cpu_time": proc_cpu_t, "sample_at": now}
+        proc_mem    = self._process.memory_info()
+
+        return {
+            "measured_at": round(now, 3),
+            "system": {
+                "cpu_logical_cores":    logical_cores,
+                "cpu_physical_cores":   psutil.cpu_count(logical=False) or logical_cores,
+                "cpu_percent":          sys_cpu,
+                "total_memory_gb":      round(sys_mem.total    / 1024 ** 3, 2),
+                "used_memory_gb":       round(sys_mem.used     / 1024 ** 3, 2),
+                "available_memory_gb":  round(sys_mem.available / 1024 ** 3, 2),
+                "memory_percent":       round(sys_mem.percent, 1),
+            },
+            "process": {
+                "pid":                       self._process.pid,
+                "thread_count":              self._process.num_threads(),
+                "cpu_percent_single_core":   round(proc_cpu_sc, 1),
+                "cpu_percent_total_machine": round(min(100.0, proc_cpu_sc / logical_cores), 1),
+                "rss_memory_mb":             round(proc_mem.rss / 1024 ** 2, 2),
+                "vms_memory_mb":             round(proc_mem.vms / 1024 ** 2, 2),
+            },
+        }
+
+    # ── Private helpers ────────────────────────────────────────────────────────
+
+    def _reset_state(self):
+        self.processes.clear()
+        self.stop_events.clear()
+        self.frame_dict.clear()
+        with self.lock:
+            self.stats_dict.clear()
+        self._running = False
+
+    def _is_alive(self, cam_id: int) -> bool:
+        proc = self.processes.get(cam_id)
+        return proc is not None and proc.is_alive()
+
+    def _cam_stats(self, cam_id: int, stats_snap: dict) -> dict:
+        stats = stats_snap.get(cam_id, {})
+        return {
+            "fps":             stats.get("fps", 0),
+            "violations":      stats.get("violations", 0),
+            "frames":          stats.get("frames", 0),
+            "status":          stats.get("status", "stopped"),
+            "runtime_fallbacks": dict(self.runtime_fallbacks),
+        }
+
+    def _build_camera_configs(self, cfg: dict) -> list[dict]:
+        """Return per-camera config list from DB, falling back to config.yaml."""
+        db_cameras = load_cameras_from_db()
+
+        if db_cameras:
+            configs = []
+            for cam in db_cameras:
+                cam_id    = cam["id"]
+                model_cfg = load_model_config_for_camera(cam_id)
+
+                if model_cfg is None:
+                    model_cfg = self._fallback_model_cfg(cfg)
+                    print(f"[CameraManager] Camera {cam_id}: no DB assignment — using config.yaml model.")
+
+                configs.append({
+                    "id":               cam_id,
+                    "url":              cam["stream_url"],
+                    "ingestion_fps":    cam["ingestion_fps"],
+                    "detection_width":  cam["detection_width"],
+                    "detection_height": cam["detection_height"],
+                    **model_cfg,
+                })
+            print(f"[CameraManager] Starting {len(configs)} camera(s) from DB.")
+            return configs
+
+        # Fallback: config.yaml camera_feeds
+        print("[CameraManager] No cameras in DB — falling back to config.yaml camera_feeds.")
+        model_cfg = self._fallback_model_cfg(cfg)
+        feeds     = cfg.get("camera_feeds", [])
+        return [
+            {
+                "id":               i,
+                "url":              url,
+                "ingestion_fps":    cfg.get("ingestion_fps", 4),
+                "detection_width":  cfg.get("detection_frame_width", 640),
+                "detection_height": cfg.get("detection_frame_height", 480),
+                **model_cfg,
+            }
+            for i, url in enumerate(feeds)
+            if url is not None and (not isinstance(url, str) or url.strip())
+        ]
+
+    def _fallback_model_cfg(self, cfg: dict) -> dict:
+        """Build model config dict from config.yaml when DB has no assignment."""
+        from detector import load_class_names
+
+        model_path = cfg.get("model_path", "")
+        abs_main   = str(_resolve_local_path(model_path)) if model_path else None
+
+        class_file = cfg.get("class_file")
+        if class_file:
+            _, hc, nhc, viol, safe = load_class_names(str(_resolve_local_path(class_file)))
+            self.helmet_class      = hc
+            self.no_helmet_class   = nhc
+            self.violation_classes = viol
+            self.safe_classes      = safe
+        else:
+            viol = self.violation_classes
+            safe = self.safe_classes
+
+        gloves  = cfg.get("gloves_model_path", "")
+        person  = cfg.get("person_model_path", "")
+        vehicle = cfg.get("vehicle_model_path", "")
+        return {
+            "main_model_path":      abs_main,
+            "gloves_model_path":    str(_resolve_local_path(gloves))  if gloves  else None,
+            "person_model_path":    str(_resolve_local_path(person))  if person  else None,
+            "vehicle_model_path":   str(_resolve_local_path(vehicle)) if vehicle else None,
+            "confidence_threshold": cfg.get("confidence_threshold", 0.25),
+            "violation_classes":    viol,
+            "safe_classes":         safe,
+        }
+
+    def _launch_inference_servers(
+        self, camera_configs: list, batch_size: int, inference_fps: float, yolo_imgsz: int,
+    ):
+        """One InferenceServer process per unique main model path."""
+        model_groups: dict[str, list] = {}
+        for cam_cfg in camera_configs:
+            mk = cam_cfg.get("main_model_path")
+            if mk:
+                model_groups.setdefault(mk, []).append(cam_cfg)
+
+        if not model_groups:
+            print("[CameraManager] Warning: no model path resolved — inference server not started.")
+
+        # Pre-create result queues
+        for cam_cfg in camera_configs:
+            cam_id = cam_cfg["id"]
+            if cam_id not in self.result_queues:
+                self.result_queues[cam_id] = self._mp_manager.Queue(maxsize=4)
+        if 0 not in self.result_queues:
+            self.result_queues[0] = self._mp_manager.Queue(maxsize=4)
+
+        for mk, group in model_groups.items():
+            rep         = group[0]
+            cam_ids     = [c["id"] for c in group]
+            fq          = mp.Queue(maxsize=batch_size * max(1, len(group)) * 2)
+            self.frame_queues[mk] = fq
+            stop_ev     = mp.Event()
+            self._inference_stop_events[mk] = stop_ev
+
+            # Build the unified models dict from DB-loaded paths.
+            # "main" is required. "gloves" and "burglar" drive MediaPipe/KCF logic
+            # in result_handler_worker. "vehicle" drives vehicle + OCR detection.
+            # All paths come from ai_models + camera_model_assignments in the DB.
+            _models: dict = {"main": mk}
+            gp = rep.get("gloves_model_path")
+            pp = rep.get("person_model_path")
+            vp = rep.get("vehicle_model_path")
+            if gp:
+                _models["gloves"]  = gp
+            if pp:
+                _models["burglar"] = pp
+            if vp:
+                _models["vehicle"] = vp
+
+            srv = mp.Process(
+                target=inference_server_loop,
+                kwargs=dict(
+                    models=_models,
+                    frame_queue=fq,
+                    result_queues=self.result_queues,
+                    stop_event=stop_ev,
+                    batch_size=batch_size,
+                    batch_timeout=max(0.02, 1.0 / max(1, float(inference_fps))),
+                    threshold=rep.get("confidence_threshold", 0.25),
+                    yolo_imgsz=yolo_imgsz,
+                ),
+                daemon=True,
+                name=f"InferenceServer-{Path(mk).stem}",
+            )
+            self._inference_servers[mk] = srv
+            srv.start()
+            print(
+                f"[CameraManager] InferenceServer started: model='{Path(mk).name}' "
+                f"PID={srv.pid} cameras={cam_ids} batch={batch_size}"
+            )
+
+    def _launch_camera_workers(
         self,
-        cam_id, url, threshold, cooldown, use_wifi, esp_ip,
-        alarm_transport, alarm_http_token,
-        mqtt_broker, mqtt_port, mqtt_username, mqtt_password,
-        mqtt_topic, mqtt_client_id, mqtt_qos, mqtt_retain,
-        # violation_classes=None, safe_classes=None, gloves_model=None,
-        violation_classes=None, safe_classes=None, gloves_model=None, person_model=None,
-        snapshot_cooldown=120,
-        detection_width=960,
-        detection_height=720,
-        yolo_imgsz=960,
-        burglar_test_sound=False,
+        camera_configs: list,
+        cooldown: float,
+        snapshot_cooldown: float,
+        yolo_imgsz: int,
+        burglar_test_sound: bool,
+        inference_fps: float,
+    ):
+        """Start ingestion process + result handler thread for each camera."""
+        started_any = False
+
+        for cam_cfg in camera_configs:
+            cam_id = cam_cfg["id"]
+            url    = cam_cfg["url"]
+            mk     = cam_cfg.get("main_model_path")
+
+            if not url or (isinstance(url, str) and not url.strip()):
+                continue
+
+            if not _is_network_source(url):
+                src_abs = _resolve_local_path(str(url))
+                if not src_abs.exists():
+                    print(f"[CameraManager] Warning: source not found for camera {cam_id}: {url}")
+                    with self.lock:
+                        self.stats_dict[cam_id] = {"status": "error", "fps": 0, "violations": 0, "frames": 0}
+                    continue
+
+            self._cam_model_map[cam_id] = mk
+            self._start_camera_worker(
+                cam_id=cam_id,
+                url=url,
+                threshold=cam_cfg.get("confidence_threshold", 0.25),
+                cooldown=cooldown,
+                snapshot_cooldown=snapshot_cooldown,
+                violation_classes=cam_cfg.get("violation_classes", []),
+                safe_classes=cam_cfg.get("safe_classes", []),
+                detection_width=cam_cfg.get("detection_width", 960),
+                detection_height=cam_cfg.get("detection_height", 720),
+                yolo_imgsz=yolo_imgsz,
+                ingestion_fps=cam_cfg.get("ingestion_fps", 4),
+                inference_fps=inference_fps,
+                burglar_test_sound=burglar_test_sound,
+                frame_queue=self.frame_queues.get(mk),
+            )
+            started_any = True
+
+        if not started_any:
+            self.runtime_fallbacks["source_fallback"] = True
+            print("[CameraManager] Warning: no valid sources — falling back to webcam 0.")
+            first_mk = next(iter(self.frame_queues), None)
+            self._cam_model_map[0] = first_mk
+            cfg = get_config()
+            self._start_camera_worker(
+                cam_id=0, url=0,
+                threshold=cfg.get("confidence_threshold", 0.25),
+                cooldown=cooldown,
+                snapshot_cooldown=snapshot_cooldown,
+                violation_classes=self.violation_classes,
+                safe_classes=self.safe_classes,
+                detection_width=cfg.get("detection_frame_width", 960),
+                detection_height=cfg.get("detection_frame_height", 720),
+                yolo_imgsz=yolo_imgsz,
+                ingestion_fps=cfg.get("ingestion_fps", 4),
+                inference_fps=inference_fps,
+                burglar_test_sound=burglar_test_sound,
+                frame_queue=self.frame_queues.get(first_mk),
+            )
+        else:
+            self.runtime_fallbacks["source_fallback"] = False
+
+    def _start_camera_worker(
+        self,
+        cam_id: int,
+        url,
+        threshold: float,
+        cooldown: float,
+        snapshot_cooldown: float,
+        violation_classes: list,
+        safe_classes: list,
+        detection_width: int,
+        detection_height: int,
+        yolo_imgsz: int,
+        ingestion_fps: float,
+        inference_fps: float,
+        burglar_test_sound: bool,
+        frame_queue,
     ):
         """
-        Internal: create and start a camera thread.
-        If a thread for this cam_id is already running, it is stopped first.
-
-        Fetches the camera's assigned buzzers from the DB so the worker thread
-        has the full buzzer config without needing DB access during inference.
-        MQTT and alarm params are passed as kwargs to avoid positional fragility.
+        Start (or restart) ingestion process + result handler thread for one camera.
+        All per-camera config (buzzers, enabled models, burglar alarm) is fetched
+        fresh from the DB here in the main process before spawning the worker.
         """
-        # Stop any existing thread for this camera slot before replacing it
+        # Stop any existing workers for this slot
         if cam_id in self.stop_events:
             self.stop_events[cam_id].set()
-            old_thread = self.threads.get(cam_id)
-            if old_thread is not None and old_thread.is_alive():
-                old_thread.join(timeout=2)
-            
-        # Fetch DB-assigned buzzers and enabled model flags for this camera
-        assigned_buzzers = _fetch_buzzers_for_camera(cam_id)
-        enabled_models   = _fetch_enabled_models_for_camera(cam_id)
-        burglar_alarm_cfg   = fetch_burglar_config(cam_id)
+            old_proc = self.processes.get(cam_id)
+            if old_proc and old_proc.is_alive():
+                old_proc.join(timeout=2)
+                if old_proc.is_alive():
+                    old_proc.terminate()
+                    old_proc.join(timeout=1)
 
+        old_rh_ev = self._result_handler_stop_events.pop(cam_id, None)
+        if old_rh_ev:
+            old_rh_ev.set()
+        old_rh_t = self._result_handler_threads.pop(cam_id, None)
+        if old_rh_t:
+            old_rh_t.join(timeout=2)
 
-        stop_event = threading.Event()
-        self.stop_events[cam_id] = stop_event
+        # Fetch per-camera config from DB (plain dicts — picklable)
+        assigned_buzzers  = fetch_buzzers_for_camera(cam_id)
+        enabled_models    = fetch_enabled_models_for_camera(cam_id)
+        burglar_alarm_cfg = fetch_burglar_config(cam_id)
+        feature_config    = get_camera_feature_config(cam_id)
 
-        t = threading.Thread(
-            target=camera_loop,
-            # Positional args match the required signature of camera_loop
-            args=(
-                cam_id, url, self.model, threshold,
-                self.helmet_class, self.no_helmet_class,
-                cooldown, use_wifi, esp_ip,
-                self.frame_dict, self.lock,
-            ),
-            # Keyword args for optional params — safer against signature changes
+        if cam_id not in self.result_queues:
+            self.result_queues[cam_id] = self._mp_manager.Queue(maxsize=4)
+
+        if frame_queue is None:
+            frame_queue = mp.Queue(maxsize=16)   # throwaway when no inference server
+
+        # Ingestion process
+        ing_stop = mp.Event()
+        self.stop_events[cam_id] = ing_stop
+
+        proc = mp.Process(
+            target=ingestion_worker,
+            args=(cam_id, url, frame_queue, ing_stop, self.stats_dict, self.lock),
             kwargs=dict(
-                stop_event=stop_event,
+                detection_width=detection_width,
+                detection_height=detection_height,
+                ingestion_fps=ingestion_fps,
+            ),
+            daemon=True,
+            name=f"Ingestion-{cam_id}",
+        )
+        self.processes[cam_id] = proc
+        proc.start()
+
+        # Result handler thread
+        rh_stop = threading.Event()
+        self._result_handler_stop_events[cam_id] = rh_stop
+
+        rh_thread = threading.Thread(
+            target=result_handler_worker,
+            kwargs=dict(
+                cam_id=cam_id,
+                result_queue=self.result_queues[cam_id],
+                frame_dict=self.frame_dict,
+                lock=self.lock,
+                threshold=threshold,
+                helmet_class=self.helmet_class or "",
+                no_helmet_class=self.no_helmet_class or "",
+                cooldown=cooldown,
+                stop_event=rh_stop,
                 stats_dict=self.stats_dict,
-                alarm_transport=alarm_transport,
-                alarm_http_token=alarm_http_token,
-                mqtt_broker=mqtt_broker,
-                mqtt_port=mqtt_port,
-                mqtt_username=mqtt_username,
-                mqtt_password=mqtt_password,
-                mqtt_topic=mqtt_topic,
-                mqtt_client_id=mqtt_client_id,
-                mqtt_qos=mqtt_qos,
-                mqtt_retain=mqtt_retain,
-                # DB-backed features
                 assigned_buzzers=assigned_buzzers,
                 alert_queue=self.alert_queue,
                 snapshot_cooldown=snapshot_cooldown,
@@ -673,183 +734,41 @@ class CameraManager:
                 enabled_models=enabled_models,
                 violation_classes=violation_classes or self.violation_classes,
                 safe_classes=safe_classes or self.safe_classes,
-                gloves_model=gloves_model if gloves_model is not None else self.gloves_model,
-                burglar_person_model=person_model if person_model is not None else self.person_model,
                 burglar_alarm_config=burglar_alarm_cfg,
                 burglar_test_sound=bool(burglar_test_sound),
+                feature_config=feature_config,
             ),
-            daemon=True,   # thread exits automatically when the main process does
+            daemon=True,
+            name=f"ResultHandler-{cam_id}",
         )
-        self.threads[cam_id] = t
-        t.start()
+        self._result_handler_threads[cam_id] = rh_thread
+        rh_thread.start()
+
         print(
-            f"[CameraManager] Camera {cam_id} started "
-            f"({len(assigned_buzzers)} buzzer(s) assigned)."
+            f"[CameraManager] Camera {cam_id} started — "
+            f"PID={proc.pid}, TID={rh_thread.native_id} "
+            f"({len(assigned_buzzers)} buzzer(s))"
         )
 
-    # ------------------------------------------------------------------
-    # Data accessors (called by route handlers)
-    # ------------------------------------------------------------------
+    # ── Alert writer ───────────────────────────────────────────────────────────
 
-    def get_latest_frame(self, cam_id: int) -> bytes | None:
-        """Return the most recent JPEG bytes for a camera, or None."""
-        with self.lock:
-            return self.frame_dict.get(cam_id)
-
-    def get_stats(self) -> dict:
-        """Return a copy of the stats dict (safe to serialize as JSON)."""
-        with self.lock:
-            return dict(self.stats_dict)
-
-    def get_resource_metrics(self) -> dict:
-        """
-        Return current server, process, and per-camera resource usage.
-
-        Per-camera CPU comes from the worker thread's CPU time delta between polls.
-        Per-camera memory cannot be isolated accurately for Python threads, so the
-        response exposes the live JPEG frame-buffer size per camera instead.
-        """
-        now = time.time()
-        logical_cores = psutil.cpu_count(logical=True) or 1
-        physical_cores = psutil.cpu_count(logical=False) or logical_cores
-        system_memory = psutil.virtual_memory()
-
-        if not self._cpu_percent_primed:
-            psutil.cpu_percent(interval=None)
-            self._cpu_percent_primed = True
-        system_cpu_percent = round(psutil.cpu_percent(interval=None), 1)
-
-        process_cpu_times = self._process.cpu_times()
-        process_cpu_time = process_cpu_times.user + process_cpu_times.system
-        prev_process_sample = self._process_cpu_sample
-        elapsed = max(now - prev_process_sample["sample_at"], 1e-6)
-        process_cpu_percent_single_core = max(
-            0.0,
-            (process_cpu_time - prev_process_sample["cpu_time"]) / elapsed * 100.0,
+    def _start_alert_writer(self):
+        if self._alert_writer_thread and self._alert_writer_thread.is_alive():
+            return
+        self._alert_writer_thread = threading.Thread(
+            target=alert_writer_loop,
+            args=(self.alert_queue,),
+            daemon=True,
+            name="AlertWriter",
         )
-        self._process_cpu_sample = {"cpu_time": process_cpu_time, "sample_at": now}
-        process_cpu_percent_single_core = round(process_cpu_percent_single_core, 1)
-        process_cpu_percent_total = round(
-            min(100.0, process_cpu_percent_single_core / logical_cores),
-            1,
-        )
+        self._alert_writer_thread.start()
+        print("[CameraManager] AlertWriter started.")
 
-        process_memory = self._process.memory_info()
-        thread_cpu_times = {
-            thread.id: thread.user_time + thread.system_time
-            for thread in self._process.threads()
-        }
-
-        cfg = get_config()
-        feeds = cfg.get("camera_feeds", [])
-        titles = cfg.get("camera_titles", [])
-
-        with self.lock:
-            stats_snapshot = {cam_id: dict(stats) for cam_id, stats in self.stats_dict.items()}
-            frame_sizes = {cam_id: len(frame) for cam_id, frame in self.frame_dict.items()}
-
-        cameras = []
-        for cam_id, url in enumerate(feeds):
-            title = titles[cam_id] if cam_id < len(titles) else f"Camera {cam_id}"
-            stats = stats_snapshot.get(cam_id, {})
-            thread_native_id = stats.get("thread_native_id")
-            thread_cpu_time = thread_cpu_times.get(thread_native_id) if thread_native_id is not None else None
-
-            cpu_percent_single_core = 0.0
-            if thread_native_id is not None and thread_cpu_time is not None:
-                previous = self._thread_cpu_samples.get(cam_id)
-                if previous and previous.get("thread_native_id") == thread_native_id:
-                    thread_elapsed = max(now - previous["sample_at"], 1e-6)
-                    cpu_percent_single_core = max(
-                        0.0,
-                        (thread_cpu_time - previous["cpu_time"]) / thread_elapsed * 100.0,
-                    )
-                self._thread_cpu_samples[cam_id] = {
-                    "thread_native_id": thread_native_id,
-                    "cpu_time": thread_cpu_time,
-                    "sample_at": now,
-                }
-            else:
-                self._thread_cpu_samples.pop(cam_id, None)
-
-            frame_buffer_bytes = int(stats.get("frame_buffer_bytes", frame_sizes.get(cam_id, 0)) or 0)
-            cpu_percent_single_core = round(min(cpu_percent_single_core, 100.0), 1)
-            cpu_percent_total = round(min(100.0, cpu_percent_single_core / logical_cores), 2)
-
-            cameras.append({
-                "id": cam_id,
-                "title": title,
-                "url": url,
-                "status": stats.get("status", "stopped"),
-                "active": cam_id in self.threads and self.threads[cam_id].is_alive(),
-                "fps": stats.get("fps", 0),
-                "thread_native_id": thread_native_id,
-                "thread_cpu_percent_single_core": cpu_percent_single_core,
-                "thread_cpu_percent_total_machine": cpu_percent_total,
-                "frame_buffer_bytes": frame_buffer_bytes,
-                "frame_buffer_mb": round(frame_buffer_bytes / (1024 * 1024), 3),
-            })
-
-        return {
-            "measured_at": round(now, 3),
-            "system": {
-                "cpu_logical_cores": logical_cores,
-                "cpu_physical_cores": physical_cores,
-                "cpu_percent": system_cpu_percent,
-                "total_memory_bytes": system_memory.total,
-                "available_memory_bytes": system_memory.available,
-                "used_memory_bytes": system_memory.used,
-                "memory_percent": round(system_memory.percent, 1),
-                "total_memory_gb": round(system_memory.total / (1024 ** 3), 2),
-                "used_memory_gb": round(system_memory.used / (1024 ** 3), 2),
-                "available_memory_gb": round(system_memory.available / (1024 ** 3), 2),
-            },
-            "process": {
-                "pid": self._process.pid,
-                "thread_count": self._process.num_threads(),
-                "cpu_percent_single_core": process_cpu_percent_single_core,
-                "cpu_percent_total_machine": process_cpu_percent_total,
-                "rss_memory_bytes": process_memory.rss,
-                "rss_memory_mb": round(process_memory.rss / (1024 * 1024), 2),
-                "vms_memory_bytes": process_memory.vms,
-                "vms_memory_mb": round(process_memory.vms / (1024 * 1024), 2),
-            },
-            # "cameras": cameras,
-            # "notes": [
-            #     "Per-camera CPU is estimated from each camera worker thread between polls.",
-            #     "Per-camera memory is reported as live MJPEG frame-buffer size because Python thread memory cannot be isolated accurately.",
-            # ],
-        }
-
-    def get_camera_statuses(self) -> list:
-        """
-        Merge config (url, title) with live thread state (active, fps, violations).
-        Used by GET /api/cameras/ and the frontend polling loop.
-        """
-        cfg = get_config()
-        feeds = cfg.get("camera_feeds", [])
-        titles = cfg.get("camera_titles", [])
-        result = []
-        for i, url in enumerate(feeds):
-            title = titles[i] if i < len(titles) else f"Camera {i}"
-            is_alive = i in self.threads and self.threads[i].is_alive()
-            stats = self.stats_dict.get(i, {})
-            result.append({
-                "id": i,
-                "url": url,
-                "title": title,
-                "active": is_alive,
-                "fps": stats.get("fps", 0),
-                "violations": stats.get("violations", 0),
-                "frames": stats.get("frames", 0),
-                "status": stats.get("status", "stopped"),
-                "runtime_fallbacks": dict(self.runtime_fallbacks),
-            })
-        return result
-
-    def is_running(self) -> bool:
-        """True if start_all() has been called and threads are active."""
-        return self._running
+    def _stop_alert_writer(self):
+        if self._alert_writer_thread and self._alert_writer_thread.is_alive():
+            self.alert_queue.put(STOP_SENTINEL)
+            self._alert_writer_thread.join(timeout=5)
+        self._alert_writer_thread = None
 
 
 # Module-level singleton — imported directly by route modules

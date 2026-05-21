@@ -156,18 +156,18 @@ export default function App() {
   const roiCamera = roiCameraId !== null ? cameras.find(c => c.id === roiCameraId) : null
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 text-slate-100">
+    <div className="flex flex-col h-screen bg-zinc-900 text-zinc-100">
       {/* Header */}
-      <header className="flex items-center justify-between px-3 sm:px-6 py-3 bg-slate-800 border-b border-slate-700 shrink-0 gap-2">
+      <header className="flex items-center justify-between px-3 sm:px-6 py-3 bg-zinc-800 border-b border-zinc-700 shrink-0 gap-2">
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
             <Camera size={18} />
           </div>
           <span className="text-base sm:text-lg font-bold tracking-wide">Axis CCTV</span>
         </div>
 
         {/* Desktop stats — hidden on mobile */}
-        <div className="hidden md:flex items-center gap-6 text-sm text-slate-400">
+        <div className="hidden md:flex items-center gap-6 text-sm text-zinc-400">
           <span>{cameras.length} camera{cameras.length !== 1 ? 's' : ''}</span>
           {activeViolations > 0 && (
             <span className="text-red-400 font-semibold">
@@ -177,60 +177,62 @@ export default function App() {
           <div className="flex items-center gap-1.5">
             {running
               ? <Wifi size={14} className="text-green-400" />
-              : <WifiOff size={14} className="text-slate-500" />}
-            <span className={running ? 'text-green-400' : 'text-slate-500'}>
+              : <WifiOff size={14} className="text-zinc-500" />}
+            <span className={running ? 'text-green-400' : 'text-zinc-500'}>
               {running ? 'Running' : 'Stopped'}
             </span>
           </div>
           {/* Logged-in user + role badge */}
-          <div className="flex items-center gap-2 text-xs text-slate-500 border-l border-slate-700 pl-4">
-            <span className="text-slate-300">{user?.sub}</span>
+          <div className="flex items-center gap-2 text-xs text-zinc-500 border-l border-zinc-700 pl-4">
+            <span className="text-zinc-300">{user?.sub}</span>
             <span className={`px-1.5 py-0.5 rounded font-semibold ${
-              isAdmin ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-400'
+              isAdmin ? 'bg-purple-900/50 text-purple-300' : 'bg-zinc-700 text-zinc-400'
             }`}>{user?.role}</span>
           </div>
         </div>
 
         {/* Mobile compact status — visible only on mobile */}
-        <div className="flex md:hidden items-center gap-2 text-xs text-slate-400 min-w-0">
+        <div className="flex md:hidden items-center gap-2 text-xs text-zinc-400 min-w-0">
           {running
             ? <Wifi size={13} className="text-green-400 shrink-0" />
-            : <WifiOff size={13} className="text-slate-500 shrink-0" />}
+            : <WifiOff size={13} className="text-zinc-500 shrink-0" />}
           {activeViolations > 0 && (
             <span className="text-red-400 font-semibold shrink-0">{activeViolations}!</span>
           )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={handleStartStop}
-            disabled={loading}
-            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
-              running
-                ? 'bg-red-600 hover:bg-red-700 text-white'
-                : 'bg-green-600 hover:bg-green-700 text-white'
-            } disabled:opacity-50`}
-          >
-            {running ? <Square size={14} /> : <Play size={14} />}
-            {loading ? '...' : running ? 'Stop' : 'Start'}
-          </button>
+          {tab === 'live' && (
+            <button
+              onClick={handleStartStop}
+              disabled={loading}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
+                running
+                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : 'bg-green-600 hover:bg-green-700 text-white'
+              } disabled:opacity-50`}
+            >
+              {running ? <Square size={14} /> : <Play size={14} />}
+              {loading ? '...' : running ? 'Stop' : 'Start'}
+            </button>
+          )}
           <button onClick={logout} title="Sign out"
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded-lg transition-colors">
+            className="p-2 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 rounded-lg transition-colors">
             <LogOut size={16} />
           </button>
         </div>
       </header>
 
       {/* Tabs — horizontally scrollable on mobile */}
-      <nav className="flex gap-1 px-2 sm:px-6 pt-3 bg-slate-800 border-b border-slate-700 shrink-0 overflow-x-auto">
+      <nav className="flex gap-1 px-2 sm:px-6 pt-3 bg-zinc-800 border-b border-zinc-700 shrink-0 overflow-x-auto">
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => handleTabChange(id)}
             className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap shrink-0 ${
               tab === id
-                ? 'bg-slate-900 text-blue-400 border-b-2 border-blue-400'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-zinc-900 text-emerald-400 border-b-2 border-emerald-400'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
             <Icon size={15} />
@@ -267,15 +269,15 @@ export default function App() {
 
       {/* ROI Editor modal — fullscreen overlay on top of live view */}
       {roiCameraId !== null && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-slate-950">
+        <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
           {/* Modal header */}
-          <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
-            <span className="text-sm font-semibold text-slate-200">
+          <div className="flex items-center justify-between px-4 py-2 bg-zinc-800 border-b border-zinc-700 shrink-0">
+            <span className="text-sm font-semibold text-zinc-200">
               ROI Zones — {roiCamera?.title || `Camera ${roiCameraId}`}
             </span>
             <button
               onClick={() => setRoiCameraId(null)}
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+              className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-lg transition-colors"
               title="Close ROI editor"
             >
               <X size={16} />

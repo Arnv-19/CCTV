@@ -1,120 +1,56 @@
-# # alarm_cooldown_sec: 30
-# # alarm_http_token: ''
-# # alarm_transport: usb
-# # burglar_test_sound: false
-# # snapshot_cooldown_sec: 120
-# # camera_feeds:
-# # - 0
-# # camera_titles:
-# # - Camera 1
-# # class_file: data/class_names.yaml
-# # confidence_threshold: 0.25
-# # esp_ip: ''
-# # gloves_model_path: weights/best (3).pt
-# # model_path: weights/best (3).pt
-# # mqtt_broker: ''
-# # mqtt_client_id: skycctv-ai
-# # mqtt_password: ''
-# # mqtt_port: 1883
-# # mqtt_qos: 1
-# # mqtt_retain: false
-# # mqtt_topic: skycctv/alarm
-# # mqtt_username: ''
-# # person_model_path: weights/best (3).pt
-# # ppe_model_path: weights/best (3).pt
-# # use_wifi: false
 
+alarm_cooldown_sec: 30
+snapshot_cooldown_sec: 120
+alarm_http_token: ''
+alarm_transport: usb
+burglar_test_sound: false
 
-# alarm_cooldown_sec: 30
-# snapshot_cooldown_sec: 120
-# alarm_http_token: ''
-# alarm_transport: usb
-# burglar_test_sound: false
-# camera_feeds:
+# Local dev: webcam 0
+# Production: uncomment RTSP feeds below and comment out the webcam line
+camera_feeds:
+- 0
 # - rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=26&subtype=0
 # - rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=28&subtype=0
 # - rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=29&subtype=0
 # - rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=27&subtype=0
-# camera_titles:
-# - Camera 1
+
+camera_titles:
+- Camera 1
 # - Camera 2
 # - Camera 3
 # - Camera 4
-# class_file: data/class_names.yaml
-# confidence_threshold: 0.25
-# esp_ip: ''
-# gloves_model_path: weights/helmet_model.pt
-# model_path: weights/ppe_final_model.pt
-# mqtt_broker: ''
-# mqtt_client_id: skycctv-ai
-# mqtt_password: ''
-# mqtt_port: 1883
-# mqtt_qos: 1
-# mqtt_retain: false
-# mqtt_topic: skycctv/alarm
-# mqtt_username: ''
-# person_model_path: weights/ppe_final_model.pt
-# ppe_model_path: weights/ppe_model.pt
-# use_wifi: false
 
-
-
-# alarm_cooldown_sec: 30
-# alarm_http_token: ''
-# alarm_transport: usb
-# burglar_test_sound: false
-# camera_feeds:
-# - 0
-# camera_titles:
-# - Camera 1
-# class_file: data/class_names.yaml
-# confidence_threshold: 0.25
-# esp_ip: ''
-# gloves_model_path: weights/ppe_final_model.pt
-# model_path: weights/ppe_final_model.pt
-# mqtt_broker: ''
-# mqtt_client_id: skycctv-ai
-# mqtt_password: ''
-# mqtt_port: 1883
-# mqtt_qos: 1
-# mqtt_retain: false
-# mqtt_topic: skycctv/alarm
-# mqtt_username: ''
-# person_model_path: weights/person_model.pt
-# ppe_model_path: weights/ppe_final_model.pt
-# use_wifi: false
-
-
-alarm_cooldown_sec: 30
-alarm_http_token: ''
-alarm_transport: usb
-burglar_test_sound: false
-camera_feeds:
-- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=26&subtype=0
-- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=28&subtype=0
-- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=29&subtype=0
-- rtsp://admin:admin%40123@192.168.20.103:554/cam/realmonitor?channel=27&subtype=0
-camera_titles:
-- Camera 1
-- Camera 2
-- Camera 3
-- Camera 4
 class_file: data/class_names.yaml
-confidence_threshold: 0.18
+confidence_threshold: 0.25
+esp_ip: ''
+
+# Model paths — update when deploying new weights
+model_path: weights/best (3).pt
+ppe_model_path: weights/best (3).pt
+gloves_model_path: weights/best (3).pt
+person_model_path: weights/best (3).pt
+
+# Resolution — lower = faster CPU/GPU, higher = better detection of distant objects
 detection_frame_width: 640
 detection_frame_height: 480
-yolo_imgsz: 640
-esp_ip: ''
-gloves_model_path: weights/best (3).pt
-model_path: weights/best (3).pt
-mqtt_broker: ''
-mqtt_client_id: skycctv-ai
-mqtt_password: ''
-mqtt_port: 1883
-mqtt_qos: 1
-mqtt_retain: false
-mqtt_topic: skycctv/alarm
-mqtt_username: ''
-person_model_path: weights/best (3).pt
-ppe_model_path: weights/best (3).pt
-use_wifi: false
+yolo_imgsz: 320
+
+# FPS and batch inference
+# ingestion_fps: 15
+# inference_fps: 8
+inference_batch_size: 8
+
+# MQTT (leave blank to disable)
+# mqtt_broker: ''
+# mqtt_client_id: skycctv-ai
+# mqtt_password: ''
+# mqtt_port: 1883
+# mqtt_qos: 1
+# mqtt_retain: false
+# mqtt_topic: skycctv/alarm
+# mqtt_username: ''
+
+# use_wifi: false
+
+
+
