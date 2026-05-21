@@ -51,7 +51,6 @@ from app.services.burglar_alarm_service import (
 from app.controllers.whatsapp_snapshot_controller import send_snapshot_best_effort
 from app.controllers.vehicle_detection_controller import (
     process_vehicle_detection,
-    make_position_key,
 )
 
 def start_ffmpeg(rtsp_url: str, width: int = 960, height: int = 720) -> subprocess.Popen:
@@ -562,9 +561,11 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
     BA_REDETECT_INTERVAL = 30
     BA_IoU_THRESHOLD     = 0.3
 
-    # Vehicle dedup: {plate_or_position_key: last_logged_timestamp}
-    _vehicle_last_seen: dict = {}
-    VEHICLE_COOLDOWN_SEC = 30
+    # Vehicle dedup: IoU-based cache — one DB row per physical vehicle visit
+    _vehicle_cache: list        = []   # [{bbox, plate, last_seen, missed_frames}]
+    VEHICLE_IOU_THRESHOLD       = 0.40  # min IoU to consider same vehicle
+    VEHICLE_EXIT_FRAMES         = 15    # consecutive missed frames before eviction
+    VEHICLE_MIN_CONF            = 0.40  # ignore YOLO detections below this confidence
 
     # Per-person PPE violation trackers
     _viol_trackers: list       = []
@@ -1198,28 +1199,69 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
                           f"({start_t}–{end_t}), KCF started (conf={det['conf']:.2f})")
                     break
 
+    def _normalise_plate(text):
+        """Strip spaces/punctuation and uppercase — canonical dedup key."""
+        if not text:
+            return None
+        cleaned = "".join(c for c in text.upper() if c.isalnum())
+        return cleaned if len(cleaned) >= 4 else None
+
     def _handle_vehicle_detection(resized, vehicle_dets_raw):
-        """Run OCR pipeline for each new vehicle; queue events and draw boxes."""
+        """IoU-cache vehicle tracker — log each physical vehicle exactly once."""
         if vehicle_dets_raw is None:
             return
         if _enabled_set is not None and "vehicle_detection" not in _enabled_set:
             return
+
         now_v = time.time()
+        matched_indices = set()
+
         for vdet in vehicle_dets_raw:
-            vbox    = vdet.get("box") or []
-            pos_key = make_position_key(vbox)
-            if now_v - _vehicle_last_seen.get(pos_key, 0) <= VEHICLE_COOLDOWN_SEC:
+            # Gate 1: skip low-confidence detections
+            if float(vdet.get("conf", 0)) < VEHICLE_MIN_CONF:
                 continue
-            # Run OCR pipeline — crops, plate detection, EasyOCR, snapshots
-            event    = process_vehicle_detection(resized, vdet, cam_id, snapshot_dir)
-            # Use plate number as dedup key when available (same plate, slight drift)
-            dedup_key = event.get("plate_number") or pos_key
-            if now_v - _vehicle_last_seen.get(dedup_key, 0) <= VEHICLE_COOLDOWN_SEC:
+            vbox = _bbox_to_int(vdet.get("box"), resized)
+            if vbox is None:
                 continue
-            _vehicle_last_seen[pos_key]   = now_v
-            _vehicle_last_seen[dedup_key] = now_v
-            if alert_queue is not None:
-                alert_queue.put(event)
+
+            # Gate 2: IoU match against active cache
+            best_iou, best_idx = 0.0, -1
+            for i, entry in enumerate(_vehicle_cache):
+                iou = _viol_iou(vbox, entry["bbox"])
+                if iou > best_iou:
+                    best_iou, best_idx = iou, i
+
+            if best_iou >= VEHICLE_IOU_THRESHOLD:
+                # Known vehicle — refresh cache only, no OCR, no DB write
+                _vehicle_cache[best_idx]["bbox"]          = vbox
+                _vehicle_cache[best_idx]["last_seen"]     = now_v
+                _vehicle_cache[best_idx]["missed_frames"] = 0
+                matched_indices.add(best_idx)
+            else:
+                # New vehicle — run OCR, log to DB, add to cache
+                event = process_vehicle_detection(resized, vdet, cam_id, snapshot_dir)
+                plate = _normalise_plate(event.get("plate_number"))
+                event["plate_number"] = plate
+                _vehicle_cache.append({
+                    "bbox":          vbox,
+                    "plate":         plate,
+                    "last_seen":     now_v,
+                    "missed_frames": 0,
+                })
+                if alert_queue is not None:
+                    alert_queue.put(event)
+
+        # Age unmatched cache entries
+        for i, entry in enumerate(_vehicle_cache):
+            if i not in matched_indices:
+                entry["missed_frames"] += 1
+
+        # Evict entries that haven't been seen for VEHICLE_EXIT_FRAMES frames
+        _vehicle_cache[:] = [
+            e for e in _vehicle_cache
+            if e["missed_frames"] < VEHICLE_EXIT_FRAMES
+        ]
+
         # Draw bounding boxes on every frame (lightweight, no cooldown)
         for vdet in vehicle_dets_raw:
             if not vdet.get("box"):
@@ -1310,6 +1352,8 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
         _cam_id_in, frame_payload, ts, detections, extra_dets = item
 
         resized = _decode_frame(frame_payload)
+        print(f"[Camera {cam_id}] Frame size: {resized.shape[1]}x{resized.shape[0]}")
+
         gloves_detections, burglar_candidates_raw, vehicle_dets_raw = (
             _resolve_detections(detections, extra_dets)
         )

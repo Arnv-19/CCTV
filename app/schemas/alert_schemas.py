@@ -48,6 +48,9 @@ class AlertOut(BaseModel):
 
 class DailyReportWhatsAppRequest(BaseModel):
     report_date: Optional[date] = None
+    camera_id: Optional[int] = None
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
     to: Optional[str] = None
     include_pdf: bool = True
     include_excel: bool = True
