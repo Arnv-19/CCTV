@@ -91,30 +91,30 @@ export const api = {
     req('POST', `/users/${id}/reset-password`, { new_password }),
 
   // ── Cameras ───────────────────────────────────────────────────────────
-  getCameras:   () => req('GET', '/cameras/'),
+  getCameras: () => req('GET', '/cameras/'),
   getCameraMetrics: () => req('GET', '/cameras/metrics'),
-  addCamera:    (body) => req('POST', '/cameras/', body),
+  addCamera: (body) => req('POST', '/cameras/', body),
   updateCamera: (id, body) => req('PUT', `/cameras/${id}`, body),
   deleteCamera: (id) => req('DELETE', `/cameras/${id}`),
-  startAll:     () => req('POST', '/cameras/start'),
-  stopAll:      () => req('POST', '/cameras/stop'),
-  startCamera:  (id) => req('POST', `/cameras/${id}/start`),
-  stopCamera:   (id) => req('POST', `/cameras/${id}/stop`),
-  streamUrl:    (camId, nonce = 0, attempt = 0) => {
+  startAll: () => req('POST', '/cameras/start'),
+  stopAll: () => req('POST', '/cameras/stop'),
+  startCamera: (id) => req('POST', `/cameras/${id}/start`),
+  stopCamera: (id) => req('POST', `/cameras/${id}/stop`),
+  streamUrl: (camId, nonce = 0, attempt = 0) => {
     const streamBase = getStreamBase(attempt)
     return `${streamBase}/stream/${camId}?_=${encodeURIComponent(String(nonce))}`
   },
 
   // ── Config ────────────────────────────────────────────────────────────
-  getConfig:    () => req('GET', '/config/'),
+  getConfig: () => req('GET', '/config/'),
   updateConfig: (data) => req('PATCH', '/config/', data),
 
   // ── Buzzers ───────────────────────────────────────────────────────────
-  getBuzzers:    () => req('GET', '/buzzers/'),
-  createBuzzer:  (body) => req('POST', '/buzzers/', body),
-  updateBuzzer:  (id, body) => req('PUT', `/buzzers/${id}`, body),
-  deleteBuzzer:  (id) => req('DELETE', `/buzzers/${id}`),
-  toggleBuzzer:  (id) => req('PATCH', `/buzzers/${id}/toggle`),
+  getBuzzers: () => req('GET', '/buzzers/'),
+  createBuzzer: (body) => req('POST', '/buzzers/', body),
+  updateBuzzer: (id, body) => req('PUT', `/buzzers/${id}`, body),
+  deleteBuzzer: (id) => req('DELETE', `/buzzers/${id}`),
+  toggleBuzzer: (id) => req('PATCH', `/buzzers/${id}/toggle`),
 
   // ── Camera ↔ Buzzer assignments ───────────────────────────────────────
   getCameraBuzzers: (camId) => req('GET', `/camera-buzzers/${camId}`),
@@ -122,7 +122,7 @@ export const api = {
     req('PUT', `/camera-buzzers/${camId}`, { buzzer_ids }),
 
   // ── Camera models ─────────────────────────────────────────────────────
-  getCameraModels:   (camId) => req('GET', `/camera-models/${camId}`),
+  getCameraModels: (camId) => req('GET', `/camera-models/${camId}`),
   upsertCameraModel: (camId, model_name, is_enabled) =>
     req('POST', `/camera-models/${camId}`, { model_name, is_enabled }),
   toggleCameraModel: (camId, model_name) =>
@@ -135,9 +135,9 @@ export const api = {
     ).toString()
     return req('GET', `/alerts/${qs ? '?' + qs : ''}`)
   },
-  getAlertSummary:  () => req('GET', '/alerts/summary'),
+  getAlertSummary: () => req('GET', '/alerts/summary'),
   acknowledgeAlert: (id) => req('PATCH', `/alerts/${id}/acknowledge`),
-  exportAlertsCsv:  (params = {}) => {
+  exportAlertsCsv: (params = {}) => {
     const qs = new URLSearchParams(
       Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
     ).toString()
@@ -171,52 +171,55 @@ export const api = {
     req('POST', `/dynamic-fps/apply${cpu_percent != null ? `?cpu_percent=${cpu_percent}` : ''}`),
 
   // ── ROI Zones ─────────────────────────────────────────────────────────
-  getRois:         (camId, activeOnly = false) =>
+  getRois: (camId, activeOnly = false) =>
     req('GET', `/rois/camera/${encodeURIComponent(camId)}?active_only=${activeOnly}`),
-  createRoi:       (camId, body)  => req('POST',   `/rois/camera/${encodeURIComponent(camId)}`, body),
-  updateRoi:       (roiId, body)  => req('PUT',    `/rois/${roiId}`, body),
-  deleteRoi:       (roiId)        => req('DELETE',  `/rois/${roiId}`),
-  toggleRoi:       (roiId)        => req('PATCH',   `/rois/${roiId}/toggle`),
-  bulkReplaceRois: (camId, rois)  => req('PUT',    `/rois/camera/${encodeURIComponent(camId)}/bulk`, { rois }),
+  createRoi: (camId, body) => req('POST', `/rois/camera/${encodeURIComponent(camId)}`, body),
+  updateRoi: (roiId, body) => req('PUT', `/rois/${roiId}`, body),
+  deleteRoi: (roiId) => req('DELETE', `/rois/${roiId}`),
+  toggleRoi: (roiId) => req('PATCH', `/rois/${roiId}/toggle`),
+  bulkReplaceRois: (camId, rois) => req('PUT', `/rois/camera/${encodeURIComponent(camId)}/bulk`, { rois }),
 
   // ── Alarm (legacy) ────────────────────────────────────────────────────
-  testAlarm:      () => req('POST', '/alarm/test'),
+  testAlarm: () => req('POST', '/alarm/test'),
   getAlarmStatus: () => req('GET', '/alarm/status'),
 
   // ── Burglar Alarm ─────────────────────────────────────────────────────
-  getBurglarAlarmConfigs:  ()            => req('GET',    '/burglar-alarm/'),
-  getBurglarAlarmConfig:   (camId)       => req('GET',    `/burglar-alarm/${camId}`),
-  upsertBurglarAlarmConfig:(camId, body) => req('PUT',    `/burglar-alarm/${camId}`, body),
-  deleteBurglarAlarmConfig:(camId)       => req('DELETE', `/burglar-alarm/${camId}`),
-  getBurglarAlarmStatus:   (camId)       => req('GET',    `/burglar-alarm/${camId}/status`),
-  verifyBurglarAlarmAllCameras: ()       => req('GET',    '/burglar-alarm/verify/all-cameras'),
+  getBurglarAlarmConfigs: () => req('GET', '/burglar-alarm/'),
+  getBurglarAlarmConfig: (camId) => req('GET', `/burglar-alarm/${camId}`),
+  upsertBurglarAlarmConfig: (camId, body) => req('PUT', `/burglar-alarm/${camId}`, body),
+  deleteBurglarAlarmConfig: (camId) => req('DELETE', `/burglar-alarm/${camId}`),
+  getBurglarAlarmStatus: (camId) => req('GET', `/burglar-alarm/${camId}/status`),
+  verifyBurglarAlarmAllCameras: () => req('GET', '/burglar-alarm/verify/all-cameras'),
 
   // ── AI Model registry ─────────────────────────────────────────────────
-  getAiModels:    ()         => req('GET',    '/ai-models/'),
-  createAiModel:  (body)     => req('POST',   '/ai-models/', body),
-  updateAiModel:  (id, body) => req('PUT',    `/ai-models/${id}`, body),
-  deleteAiModel:  (id)       => req('DELETE', `/ai-models/${id}`),
+  getAiModels: () => req('GET', '/ai-models/'),
+  createAiModel: (body) => req('POST', '/ai-models/', body),
+  updateAiModel: (id, body) => req('PUT', `/ai-models/${id}`, body),
+  deleteAiModel: (id) => req('DELETE', `/ai-models/${id}`),
 
   // ── Server file browser ───────────────────────────────────────────────
   browseFiles: (dir = '') =>
     req('GET', `/files/browse${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`),
 
   // ── Logs ──────────────────────────────────────────────────────────────
-  getLogs:   (lines = 100) => req('GET', `/logs/?lines=${lines}`),
+  getLogs: (lines = 100) => req('GET', `/logs/?lines=${lines}`),
   clearLogs: () => req('DELETE', '/logs/'),
 
   // ── Employees (face-recognition enrollment) ───────────────────────────
-  getEmployees:         ()           => req('GET',    '/employees/'),
-  createEmployee:       (body)       => req('POST',   '/employees/', body),
-  deleteEmployee:       (id)         => req('DELETE', `/employees/${id}`),
-  enrollEmployee:       (id, formData) => http.post(`/employees/${id}/enroll`, formData, {
+  getEmployees: () => req('GET', '/employees/'),
+  createEmployee: (body) => req('POST', '/employees/', body),
+  deleteEmployee: (id) => req('DELETE', `/employees/${id}`),
+  enrollEmployee: (id, formData) => http.post(`/employees/${id}/enroll`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data),
-  bulkEnrollEmployees:  (formData)   => http.post('/employees/bulk-enroll', formData, {
+  bulkEnrollEmployees: (formData) => http.post('/employees/bulk-enroll', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data),
 
   // Photo / snapshot URLs — no auth needed (images loaded by <img> tags)
-  employeePhotoUrl:  (id)      => `${API_BASE}/employees/${id}/photo`,
-  alertSnapshotUrl:  (alertId) => `${API_BASE}/alerts/snapshot/${alertId}`,
+  employeePhotoUrl: (id) => `${API_BASE}/employees/${id}/photo`,
+  alertSnapshotUrl: (alertId) => `${API_BASE}/alerts/snapshot/${alertId}`,
 }
+
+
+
