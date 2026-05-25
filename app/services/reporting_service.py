@@ -25,6 +25,9 @@ REPORT_HEADERS = [
     "WITHOUT VEST",
     "SAFE ZONE",
     "OFF HOURS",
+    "EMPLOYEE ID",
+    "EMPLOYEE NAME",
+    "FACE STATUS",
 ]
 
 
@@ -76,6 +79,9 @@ class DailyReportRow:
     without_vest: int
     safe_zone: str
     off_hours: str
+    employee_id: str
+    employee_name: str
+    face_status: str
 
     def as_list(self) -> list[str | int]:
         return [
@@ -89,6 +95,9 @@ class DailyReportRow:
             self.without_vest,
             self.safe_zone,
             self.off_hours,
+            self.employee_id,
+            self.employee_name,
+            self.face_status,
         ]
 
 
@@ -166,6 +175,9 @@ def build_daily_report_rows(
                 without_vest=1 if bucket == "without_vest" else 0,
                 safe_zone="YES" if bucket == "safe_zone" else "NO",
                 off_hours="YES" if bucket == "off_hours" else "NO",
+                employee_id=str(alert.face_employee_id) if alert.face_employee_id is not None else "—",
+                employee_name=alert.face_name or "—",
+                face_status=alert.face_status or "—",
             )
         )
     if not rows and include_dummy_data:
@@ -194,6 +206,9 @@ def build_dummy_report_rows(report_date: date) -> list[DailyReportRow]:
                 without_vest=vest,
                 safe_zone=safe_zone,
                 off_hours=off_hours,
+                employee_id="—",
+                employee_name="—",
+                face_status="—",
             )
         )
     return rows
@@ -303,14 +318,14 @@ def render_daily_report_xlsx(
         '<col min="2" max="2" width="14" customWidth="1"/>'
         '<col min="3" max="3" width="12" customWidth="1"/>'
         '<col min="4" max="4" width="24" customWidth="1"/>'
-        '<col min="5" max="10" width="16" customWidth="1"/>'
+        '<col min="5" max="13" width="16" customWidth="1"/>'
         '</cols>'
         f'<sheetData>{"".join(row_xml_parts)}</sheetData>'
         '<mergeCells count="4">'
-        '<mergeCell ref="A1:J1"/>'
-        '<mergeCell ref="A2:J2"/>'
-        '<mergeCell ref="A3:J3"/>'
-        '<mergeCell ref="A4:J4"/>'
+        '<mergeCell ref="A1:M1"/>'
+        '<mergeCell ref="A2:M2"/>'
+        '<mergeCell ref="A3:M3"/>'
+        '<mergeCell ref="A4:M4"/>'
         '</mergeCells>'
         '</worksheet>'
     )
@@ -497,7 +512,7 @@ def _render_table_pdf(
     top_margin = 36
     bottom_margin = 16
     content_width = page_width - (margin_x * 2)
-    col_widths = [76, 56, 54, 108, 66, 64, 72, 66, 68, 68]
+    col_widths = [60, 50, 40, 75, 55, 55, 55, 55, 55, 55, 55, 60, 50]
     table_width = sum(col_widths)
     table_x = margin_x
     x_positions = [margin_x]

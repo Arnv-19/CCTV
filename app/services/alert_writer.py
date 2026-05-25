@@ -98,6 +98,10 @@ def alert_writer_loop(queue: Queue):
                         triggered_at       = _now_ist(),
                         buzzer_activated   = item.get("buzzer_activated", False),
                         session_tracker_id = item.get("session_tracker_id"),
+                        face_employee_id   = item.get("face_employee_id"),
+                        face_name          = item.get("face_name"),
+                        face_confidence    = item.get("face_confidence"),
+                        face_status        = item.get("face_status"),
                     ))
                 db.commit()
 

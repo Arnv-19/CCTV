@@ -183,21 +183,19 @@ export const api = {
   testAlarm:      () => req('POST', '/alarm/test'),
   getAlarmStatus: () => req('GET', '/alarm/status'),
 
-
-    // ── Burglar Alarm ─────────────────────────────────────────────────────
-  getBurglarAlarmConfigs:  ()           => req('GET',    '/burglar-alarm/'),
-  getBurglarAlarmConfig:   (camId)      => req('GET',    `/burglar-alarm/${camId}`),
-  upsertBurglarAlarmConfig:(camId, body)=> req('PUT',    `/burglar-alarm/${camId}`, body),
-  deleteBurglarAlarmConfig:(camId)      => req('DELETE', `/burglar-alarm/${camId}`),
-  getBurglarAlarmStatus:   (camId)      => req('GET',    `/burglar-alarm/${camId}/status`),
-  verifyBurglarAlarmAllCameras: ()      => req('GET',    '/burglar-alarm/verify/all-cameras'),
-
+  // ── Burglar Alarm ─────────────────────────────────────────────────────
+  getBurglarAlarmConfigs:  ()            => req('GET',    '/burglar-alarm/'),
+  getBurglarAlarmConfig:   (camId)       => req('GET',    `/burglar-alarm/${camId}`),
+  upsertBurglarAlarmConfig:(camId, body) => req('PUT',    `/burglar-alarm/${camId}`, body),
+  deleteBurglarAlarmConfig:(camId)       => req('DELETE', `/burglar-alarm/${camId}`),
+  getBurglarAlarmStatus:   (camId)       => req('GET',    `/burglar-alarm/${camId}/status`),
+  verifyBurglarAlarmAllCameras: ()       => req('GET',    '/burglar-alarm/verify/all-cameras'),
 
   // ── AI Model registry ─────────────────────────────────────────────────
-  getAiModels:    ()        => req('GET',    '/ai-models/'),
-  createAiModel:  (body)    => req('POST',   '/ai-models/', body),
-  updateAiModel:  (id, body)=> req('PUT',    `/ai-models/${id}`, body),
-  deleteAiModel:  (id)      => req('DELETE', `/ai-models/${id}`),
+  getAiModels:    ()         => req('GET',    '/ai-models/'),
+  createAiModel:  (body)     => req('POST',   '/ai-models/', body),
+  updateAiModel:  (id, body) => req('PUT',    `/ai-models/${id}`, body),
+  deleteAiModel:  (id)       => req('DELETE', `/ai-models/${id}`),
 
   // ── Server file browser ───────────────────────────────────────────────
   browseFiles: (dir = '') =>
@@ -206,4 +204,19 @@ export const api = {
   // ── Logs ──────────────────────────────────────────────────────────────
   getLogs:   (lines = 100) => req('GET', `/logs/?lines=${lines}`),
   clearLogs: () => req('DELETE', '/logs/'),
+
+  // ── Employees (face-recognition enrollment) ───────────────────────────
+  getEmployees:         ()           => req('GET',    '/employees/'),
+  createEmployee:       (body)       => req('POST',   '/employees/', body),
+  deleteEmployee:       (id)         => req('DELETE', `/employees/${id}`),
+  enrollEmployee:       (id, formData) => http.post(`/employees/${id}/enroll`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data),
+  bulkEnrollEmployees:  (formData)   => http.post('/employees/bulk-enroll', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data),
+
+  // Photo / snapshot URLs — no auth needed (images loaded by <img> tags)
+  employeePhotoUrl:  (id)      => `${API_BASE}/employees/${id}/photo`,
+  alertSnapshotUrl:  (alertId) => `${API_BASE}/alerts/snapshot/${alertId}`,
 }

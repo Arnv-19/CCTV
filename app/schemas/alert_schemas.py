@@ -26,6 +26,11 @@ class AlertCreate(BaseModel):
     confidence_score: float
     snapshot_path:    Optional[str] = None
     buzzer_activated: bool = False
+    # Face recognition fields (§4.4) — optional, set by inference pipeline
+    face_employee_id: Optional[int]   = None
+    face_name:        Optional[str]   = None
+    face_confidence:  Optional[float] = None
+    face_status:      Optional[str]   = None
 
 
 class AlertOut(BaseModel):
@@ -41,6 +46,11 @@ class AlertOut(BaseModel):
     acknowledged_by:  Optional[int]
     acknowledged_at:  Optional[datetime]
     acknowledger_name: Optional[str] = None
+    # Face recognition fields (§4.4)
+    face_employee_id: Optional[int]   = None
+    face_name:        Optional[str]   = None
+    face_confidence:  Optional[float] = None
+    face_status:      Optional[str]   = None
 
     class Config:
         from_attributes = True
@@ -71,4 +81,9 @@ def _alert_dict(a: Alert) -> dict:
         "acknowledged_by":  a.acknowledged_by,
         "acknowledged_at":  a.acknowledged_at,
         "acknowledger_name": a.acknowledger.username if a.acknowledger else None,
+        # Face recognition fields (§4.4)
+        "face_employee_id": a.face_employee_id,
+        "face_name":        a.face_name,
+        "face_confidence":  round(a.face_confidence, 4) if a.face_confidence is not None else None,
+        "face_status":      a.face_status,
     }

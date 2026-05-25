@@ -123,13 +123,16 @@ def log_violation_file(
     frame_index: int,
     violation_rate: float,
     violation_type: str = "violation",
+    employee_id: str | None = None,
+    employee_name: str | None = None,
 ):
     """Append a violation line to the flat-file log (kept for backward compat)."""
     ensure_dir("logs")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    emp_str = f" | Employee ID: {employee_id} | Name: {employee_name}" if employee_id or employee_name else ""
     with open("logs/alerts.log", "a") as f:
         f.write(
-            f"[{now}] Camera {cam_id} | Frame {frame_index} | {violation_type} | Rate: {violation_rate:.2f}%\n"
+            f"[{now}] Camera {cam_id} | Frame {frame_index} | {violation_type}{emp_str} | Rate: {violation_rate:.2f}%\n"
         )
 
 
@@ -422,6 +425,8 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
     burglar_alarm_config: dict = None,
     burglar_test_sound: bool = False,
     feature_config: dict = None,
+    face_detection_enabled: bool = False,
+    face_detection_mode: str = "standard",
 ):
     """
     Per-camera result handler thread (runs in main process).
@@ -659,10 +664,40 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
             "saved_at":   time.time(),
         })
 
+    _last_emp_fetch = 0.0
+    _cached_employees = []
+
+    def _get_enrolled_employees():
+        nonlocal _last_emp_fetch, _cached_employees
+        now = time.time()
+        if now - _last_emp_fetch > 10.0:
+            try:
+                from app.db.database import SessionLocal
+                from app.db.models import Employee
+                with SessionLocal() as db:
+                    rows = db.query(Employee).filter(Employee.is_enrolled == True).all()
+                    class SimpleEmp:
+                        def __init__(self, id, name, employee_id, embedding, embedding_aug, is_enrolled):
+                            self.id = id
+                            self.name = name
+                            self.employee_id = employee_id
+                            self.embedding = embedding
+                            self.embedding_aug = embedding_aug
+                            self.is_enrolled = is_enrolled
+                    _cached_employees = [
+                        SimpleEmp(e.id, e.name, e.employee_id, e.embedding, e.embedding_aug, e.is_enrolled)
+                        for e in rows
+                    ]
+                _last_emp_fetch = now
+            except Exception as e:
+                print(f"[ResultHandler {cam_id}] Error loading employees: {e}")
+        return _cached_employees
+
     # ── Alert helpers (defined once; resized passed per-call) ─────────────
 
     def record_violation(det, resized, violation_type=None, allow_snapshot=True,
-                         session_tracker_id=None, skip_cooldown=False):
+                         session_tracker_id=None, skip_cooldown=False,
+                         face_employee_id=None, face_name=None, face_confidence=None, face_status=None):
         nonlocal violations
         violation_name = violation_type or det.get("class", "violation")
         violation_key  = _class_key(violation_name)
@@ -694,8 +729,13 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
                 "snapshot_path":       snap_path,
                 "buzzer_activated":    buzzer_fired,
                 "session_tracker_id":  session_tracker_id,
+                "face_employee_id":    face_employee_id,
+                "face_name":           face_name,
+                "face_confidence":     face_confidence,
+                "face_status":         face_status,
             })
-        log_violation_file(cam_id, frame_count, (violations / frame_count) * 100, violation_name)
+        log_violation_file(cam_id, frame_count, (violations / frame_count) * 100, violation_name,
+                           employee_id=face_employee_id, employee_name=face_name)
         return True
 
     def record_system_alert(
@@ -1033,8 +1073,33 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
                         logged_this_frame.add(vk)
                         continue   # skip alert — already fired for this person
 
+            fe_id, f_name, f_conf, f_stat = None, None, None, None
+            if face_detection_enabled:
+                def _find_face_for_person(person_bbox):
+                    if not person_bbox:
+                        return None
+                    for fd in detected_faces_data:
+                        f_bbox = fd["bbox"]
+                        fcx = (f_bbox[0] + f_bbox[2]) / 2
+                        fcy = (f_bbox[1] + f_bbox[3]) / 2
+                        px1, py1, px2, py2 = person_bbox
+                        if (px1 - 20 <= fcx <= px2 + 20) and (py1 - 20 <= fcy <= py2 + 20):
+                            return fd
+                    return None
+
+                face_info = _find_face_for_person(tracker_bbox)
+                if face_info:
+                    fe_id  = face_info["employee_id"]
+                    f_name = face_info["employee_name"]
+                    f_conf = face_info["confidence"]
+                    f_stat = face_info["status"]
+                else:
+                    f_stat = "not_visible"
+
             if record_violation(det, resized, allow_snapshot=is_truly_new,
-                                session_tracker_id=session_id, skip_cooldown=True):
+                                session_tracker_id=session_id, skip_cooldown=True,
+                                face_employee_id=fe_id, face_name=f_name,
+                                face_confidence=f_conf, face_status=f_stat):
                 logged_this_frame.add(vk)
                 if tracker_bbox:
                     if existing is not None:
@@ -1343,6 +1408,7 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
     # ── Main loop ──────────────────────────────────────────────────────────
 
     set_stats("running", 0, 0, 0)
+    _face_cache = []
 
     while True:
         if stop_event is not None and stop_event.is_set():
@@ -1377,6 +1443,75 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
             and det.get("box")
         ]
         person_count  = len(person_bboxes)
+
+        # Prune face cache: keep only entries from the last 12 frames
+        _face_cache[:] = [c for c in _face_cache if frame_count - c["last_seen_frame"] < 12]
+
+        detected_faces_data = []
+        if face_detection_enabled and person_count > 0:
+            try:
+                from app.services.face_service import FaceService
+                svc = FaceService.get()
+                enrolled = _get_enrolled_employees()
+                
+                h, w = resized.shape[:2]
+                for p_box in person_bboxes:
+                    # 1. Look up in the cache first (Recommendation 5)
+                    px1, py1, px2, py2 = p_box
+                    cached_match = None
+                    for ce in _face_cache:
+                        cx = (ce["bbox"][0] + ce["bbox"][2]) / 2
+                        cy = (ce["bbox"][1] + ce["bbox"][3]) / 2
+                        # If face centre is inside the person box
+                        if (px1 - 25 <= cx <= px2 + 25) and (py1 - 25 <= cy <= py2 + 25):
+                            cached_match = ce
+                            break
+                    
+                    if cached_match is not None:
+                        # Reuse cached match and update position based on new person location
+                        pw = px2 - px1
+                        ph = py2 - py1
+                        new_fb = [
+                            int(px1 + pw * 0.15),
+                            int(py1 + ph * 0.02),
+                            int(px2 - pw * 0.15),
+                            int(py1 + ph * 0.35)
+                        ]
+                        cached_match["bbox"] = new_fb
+                        cached_match["last_seen_frame"] = frame_count
+                        detected_faces_data.append(cached_match)
+                    else:
+                        # 2. Crop and run heavy face detection on crop (Recommendation 3)
+                        cx1 = max(0, int(px1))
+                        cy1 = max(0, int(py1))
+                        cx2 = min(w, int(px2))
+                        cy2 = min(h, int(py2))
+                        
+                        crop = resized[cy1:cy2, cx1:cx2]
+                        if crop.size > 0:
+                            faces = svc.detect_faces(crop)
+                            for f in faces:
+                                best_emp, best_score = svc.find_best_match(f.embedding, enrolled)
+                                fb_abs = [
+                                    int(f.bbox[0] + cx1),
+                                    int(f.bbox[1] + cy1),
+                                    int(f.bbox[2] + cx1),
+                                    int(f.bbox[3] + cy1)
+                                ]
+                                new_entry = {
+                                    "bbox": fb_abs,
+                                    "employee_id": best_emp.id if best_emp else None,
+                                    "employee_name": best_emp.name if best_emp else None,
+                                    "confidence": best_score,
+                                    "status": "matched" if best_emp else "unknown",
+                                    "last_seen_frame": frame_count
+                                }
+                                _face_cache.append(new_entry)
+                                detected_faces_data.append(new_entry)
+                                # Break after finding one face to avoid sub-detections on a single crop
+                                break
+            except Exception as exc:
+                print(f"[ResultHandler {cam_id}] Face crop detection error: {exc}")
         all_viol_bboxes = [
             det["box"] for det in filtered_detections
             if _is_violation_class(det.get("class")) and det.get("box")
@@ -1392,6 +1527,19 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
         _handle_burglar_alarm(resized, burglar_candidates_raw)
         _handle_vehicle_detection(resized, vehicle_dets_raw)
         _draw_ppe_detections(resized, filtered_detections)
+
+        if face_detection_enabled:
+            for fd in detected_faces_data:
+                fx1, fy1, fx2, fy2 = fd["bbox"]
+                if fd["status"] == "matched":
+                    color = (0, 255, 0)
+                    label = f"{fd['employee_name']} (ID: {fd['employee_id']})"
+                else:
+                    color = (0, 0, 255)
+                    label = "Unknown"
+                cv2.rectangle(resized, (fx1, fy1), (fx2, fy2), color, 1)
+                cv2.putText(resized, label, (fx1, max(0, fy1 - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
         fps = 1.0 / (time.time() - start + 1e-5)
         cv2.putText(resized, f"Cam {cam_id} | FPS: {fps:.1f} | Violations: {violations}",
