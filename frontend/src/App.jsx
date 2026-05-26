@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import {
   Camera, Settings, FileText, Bell, Play, Square,
-  Wifi, WifiOff, BarChart2, BellRing, Users, LogOut, X,ShieldAlert
+  Wifi, WifiOff, BarChart2, BellRing, Users, LogOut, X, ShieldAlert, UserCheck
 } from 'lucide-react'
 import { useAuth } from './contexts/AuthContext'
 import { api } from './api/client'
@@ -22,6 +22,7 @@ import BuzzersPanel  from './components/BuzzersPanel'
 import UsersPanel    from './components/UsersPanel'
 import ROIEditorPage from './components/ROIEditorPage'
 import BurglarAlarmPanel  from './components/BurglarAlarmPanel'
+import EmployeesPanel     from './components/EmployeesPanel'
 
 
 function buildTabs(isAdmin) {
@@ -36,8 +37,9 @@ function buildTabs(isAdmin) {
   ]
   if (isAdmin) {
     tabs.push(
-      { id: 'buzzers', label: 'Buzzers', Icon: BellRing },
-      { id: 'users',   label: 'Users',   Icon: Users    },
+      { id: 'buzzers',    label: 'Buzzers',   Icon: BellRing    },
+      { id: 'users',      label: 'Users',     Icon: Users       },
+      { id: 'employees',  label: 'Employees', Icon: UserCheck   },
     )
   }
   return tabs
@@ -263,8 +265,9 @@ export default function App() {
         {tab === 'logs'    && <LogsPanel />}
         {tab === 'alarm'   && <AlarmPanel onTest={() => showToast('Alarm triggered')} />}
         {tab === 'burglar' && <BurglarAlarmPanel />}
-        {tab === 'buzzers' && isAdmin && <BuzzersPanel />}
-        {tab === 'users'   && isAdmin && <UsersPanel />}
+        {tab === 'buzzers'   && isAdmin && <BuzzersPanel />}
+        {tab === 'users'     && isAdmin && <UsersPanel />}
+        {tab === 'employees' && isAdmin && <EmployeesPanel />}
       </main>
 
       {/* ROI Editor modal — fullscreen overlay on top of live view */}

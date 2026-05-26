@@ -24,10 +24,12 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.db.database import get_db
-from app.db.models import Camera, AIModel, CameraModelAssignment, CameraClassConfig
+from app.db.models import Camera, AIModel, CameraModelAssignment, CameraClassConfig, User
 from app.db.models.camera_model import CameraModel
-from app.services.camera_manager import camera_manager
+from app.dependencies import require_admin
 from app.schemas.cameras_schema import CameraCreate, CameraUpdate
+from app.schemas.employee_schemas import FaceConfigPatch, FaceConfigOut
+from app.services.camera_manager import camera_manager
 
 router = APIRouter()
 
@@ -190,3 +192,59 @@ def stop_camera(cam_id: int):
     """Stop the detection process for a single camera."""
     camera_manager.stop_camera(cam_id)
     return {"message": f"Camera {cam_id} stopped"}
+
+
+# ── Face recognition config ───────────────────────────────────────────────────
+
+@router.get("/{cam_id}/face-config", response_model=FaceConfigOut)
+def get_face_config(
+    cam_id: int,
+    db: Session = Depends(get_db),
+):
+    """Return the current face-recognition configuration for a camera."""
+    cam = db.query(Camera).filter(Camera.id == cam_id).first()
+    if not cam:
+        raise HTTPException(404, "Camera not found")
+    return FaceConfigOut(
+        camera_id=cam.id,
+        face_detection_enabled=cam.face_detection_enabled,
+        face_detection_mode=cam.face_detection_mode,
+    )
+
+
+@router.patch("/{cam_id}/face-config", response_model=FaceConfigOut)
+def set_face_config(
+    cam_id: int,
+    body: FaceConfigPatch,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """
+    Update face-recognition settings for a specific camera.
+
+    - **face_detection_enabled** — enable or disable face processing on this camera
+    - **face_detection_mode**   — ``"standard"`` | ``"long_range"``
+
+    Only the fields provided in the request body are updated.
+    """
+    cam = db.query(Camera).filter(Camera.id == cam_id).first()
+    if not cam:
+        raise HTTPException(404, "Camera not found")
+
+    if body.face_detection_enabled is not None:
+        cam.face_detection_enabled = body.face_detection_enabled
+    if body.face_detection_mode is not None:
+        cam.face_detection_mode = body.face_detection_mode
+
+    try:
+        db.commit()
+        db.refresh(cam)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(500, f"Could not update face config: {exc}") from exc
+
+    return FaceConfigOut(
+        camera_id=cam.id,
+        face_detection_enabled=cam.face_detection_enabled,
+        face_detection_mode=cam.face_detection_mode,
+    )

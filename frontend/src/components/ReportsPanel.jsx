@@ -6,12 +6,134 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { Download, CheckCheck, AlertTriangle, Camera, Cpu, BellRing, FileText, FileSpreadsheet, MessageCircle } from 'lucide-react'
+import { Download, CheckCheck, AlertTriangle, Camera, Cpu, BellRing, FileText, FileSpreadsheet, MessageCircle, User, ShieldCheck, ShieldAlert, ShieldQuestion, EyeOff, ZoomIn, X, Image } from 'lucide-react'
 import { api } from '../api/client'
 
 const inputCls =
   'bg-zinc-700 border border-zinc-600 rounded-lg px-3 py-2 text-sm ' +
   'text-zinc-100 focus:outline-none focus:border-emerald-500'
+
+/* ── Snapshot Lightbox ─────────────────────────────────────── */
+function SnapshotLightbox({ src, onClose }) {
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-w-3xl w-full rounded-2xl overflow-hidden shadow-2xl border border-zinc-700"
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 z-10 p-1.5 bg-zinc-900/80 hover:bg-zinc-700 text-zinc-300 rounded-full transition-colors"
+        >
+          <X size={16} />
+        </button>
+        <img src={src} alt="Violation snapshot" className="w-full h-auto max-h-[85vh] object-contain bg-zinc-900" />
+        <div className="bg-zinc-900/90 px-4 py-2 text-xs text-zinc-400 text-center">
+          Violation Snapshot — Click outside or press Esc to close
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── Snapshot thumbnail cell ───────────────────────────────── */
+function SnapshotCell({ alert, onLightbox }) {
+  if (!alert.snapshot_path) {
+    return (
+      <td className="px-3 py-3">
+        <div className="w-14 h-10 rounded bg-zinc-700/50 flex items-center justify-center">
+          <Image size={14} className="text-zinc-600" />
+        </div>
+      </td>
+    )
+  }
+  const src = api.alertSnapshotUrl(alert.id)
+  return (
+    <td className="px-3 py-3">
+      <button
+        onClick={() => onLightbox(src)}
+        title="View violation snapshot"
+        className="relative w-14 h-10 rounded overflow-hidden bg-zinc-800 border border-zinc-600 hover:border-red-500 transition-colors group shrink-0"
+      >
+        <img
+          src={src}
+          alt="snapshot"
+          className="w-full h-full object-cover group-hover:opacity-90 transition-opacity"
+          onError={e => { e.target.style.display = 'none'; e.target.parentElement.classList.add('flex', 'items-center', 'justify-center') }}
+        />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors">
+          <ZoomIn size={12} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+      </button>
+    </td>
+  )
+}
+
+/* ── Face-status badge ─────────────────────────────────────── */
+const FACE_STATUS_META = {
+  matched:     { label: 'Matched',     cls: 'bg-emerald-900/50 text-emerald-300 border border-emerald-700', Icon: ShieldCheck },
+  unknown:     { label: 'Unknown',     cls: 'bg-red-900/50    text-red-300    border border-red-700',     Icon: ShieldAlert },
+  not_visible: { label: 'Not Visible', cls: 'bg-zinc-700      text-zinc-400   border border-zinc-600',   Icon: EyeOff },
+  too_small:   { label: 'Too Small',   cls: 'bg-amber-900/50  text-amber-300  border border-amber-700',  Icon: ZoomIn },
+  low_quality: { label: 'Low Quality', cls: 'bg-orange-900/50 text-orange-300 border border-orange-700', Icon: ShieldQuestion },
+}
+
+function FaceStatusBadge({ status }) {
+  if (!status) return <span className="text-zinc-600 text-xs">—</span>
+  const meta = FACE_STATUS_META[status] ?? { label: status, cls: 'bg-zinc-700 text-zinc-400', Icon: ShieldQuestion }
+  const { label, cls, Icon } = meta
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${cls}`}>
+      <Icon size={10} />
+      {label}
+    </span>
+  )
+}
+
+function EmployeeCell({ alert }) {
+  const hasEmployee = alert.face_name || alert.face_employee_id
+  return (
+    <td className="px-4 py-3">
+      <div className="flex flex-col gap-1 min-w-[120px]">
+        {hasEmployee ? (
+          <div className="flex items-center gap-1.5">
+            {alert.face_employee_id ? (
+              <img
+                src={`/api/employees/${alert.face_employee_id}/photo`}
+                alt={alert.face_name ?? 'Employee'}
+                className="w-5 h-5 rounded-full object-cover ring-1 ring-zinc-600 shrink-0"
+                onError={(e) => { e.target.style.display = 'none' }}
+              />
+            ) : (
+              <User size={12} className="text-zinc-400 shrink-0" />
+            )}
+            <span className="text-xs font-semibold text-zinc-200 truncate max-w-[100px]">
+              {alert.face_name ?? `Emp #${alert.face_employee_id}`}
+            </span>
+            {alert.face_confidence != null && (
+              <span className="text-[10px] text-zinc-500 shrink-0">
+                {(alert.face_confidence * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-zinc-600 text-xs">—</span>
+        )}
+        <FaceStatusBadge status={alert.face_status} />
+      </div>
+    </td>
+  )
+}
+
 
 function SummaryCard({ icon: Icon, label, value, color }) {
   return (
@@ -36,11 +158,12 @@ export default function ReportsPanel() {
   const [appliedFilters, setAppliedFilters] = useState({
     camera_id: '', date_from: '', date_to: '',
   })
-  const [page,    setPage]    = useState(1)
-  const [total,   setTotal]   = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState(null)
-  const [success, setSuccess] = useState('')
+  const [page,         setPage]         = useState(1)
+  const [total,        setTotal]        = useState(0)
+  const [loading,      setLoading]      = useState(false)
+  const [error,        setError]        = useState(null)
+  const [success,      setSuccess]      = useState('')
+  const [lightboxSrc,  setLightboxSrc]  = useState(null)
   const PAGE_SIZE = 10
   const reportDate = appliedFilters.date_to || appliedFilters.date_from || new Date().toISOString().slice(0, 10)
   const reportParams = {
@@ -276,11 +399,13 @@ export default function ReportsPanel() {
           <table className="w-full text-sm">
             <thead className="bg-zinc-700/50">
               <tr className="text-left text-xs text-zinc-400 uppercase tracking-wider">
+                <th className="px-3 py-3 w-16">Snap</th>
                 <th className="px-4 py-3">Time</th>
                 <th className="px-4 py-3">Camera</th>
                 <th className="px-4 py-3">Model</th>
                 <th className="px-4 py-3">Violation</th>
                 <th className="px-4 py-3">Conf</th>
+                <th className="px-4 py-3">Employee / Face</th>
                 <th className="px-4 py-3">Buzzer</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -289,6 +414,7 @@ export default function ReportsPanel() {
               {alerts.map(a => (
                 <tr key={a.id}
                   className={`hover:bg-zinc-700/30 transition-colors ${a.acknowledged ? 'opacity-60' : ''}`}>
+                  <SnapshotCell alert={a} onLightbox={setLightboxSrc} />
                   <td className="px-4 py-3 text-zinc-400 text-xs whitespace-nowrap">
                     {new Date(a.triggered_at).toLocaleString()}
                   </td>
@@ -302,6 +428,7 @@ export default function ReportsPanel() {
                   <td className="px-4 py-3 text-zinc-400 text-xs">
                     {(a.confidence_score * 100).toFixed(0)}%
                   </td>
+                  <EmployeeCell alert={a} />
                   <td className="px-4 py-3">
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                       a.buzzer_activated
@@ -353,6 +480,11 @@ export default function ReportsPanel() {
             Next
           </button>
         </div>
+      )}
+
+      {/* Snapshot lightbox */}
+      {lightboxSrc && (
+        <SnapshotLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
       )}
     </div>
   )

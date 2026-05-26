@@ -13,11 +13,12 @@ GET    /api/alerts/export     Export filtered alerts as CSV download
 import csv
 import io
 from datetime import date, datetime, time, timezone
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -233,6 +234,28 @@ def acknowledge_alert(
     db.commit()
     db.refresh(alert)
     return _alert_dict(alert)
+
+
+@router.get("/snapshot/{alert_id}")
+def serve_alert_snapshot(alert_id: int, db: Session = Depends(get_db)):
+    """
+    Serve the violation snapshot JPEG for a specific alert.
+
+    No auth required — images are loaded by <img> tags which cannot send JWT headers.
+    """
+    alert = db.get(Alert, alert_id)
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    if not alert.snapshot_path:
+        raise HTTPException(404, "No snapshot for this alert")
+    snap = Path(alert.snapshot_path)
+    if not snap.exists():
+        raise HTTPException(404, "Snapshot file not found on disk")
+    return FileResponse(
+        path=str(snap),
+        media_type="image/jpeg",
+        filename=snap.name,
+    )
 
 
 @router.get("/export")

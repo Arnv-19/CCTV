@@ -21,7 +21,12 @@ class Camera(Base):
     ingestion_fps    = Column(Integer, default=4, nullable=False)
     detection_width  = Column(Integer, default=960, nullable=False)
     detection_height = Column(Integer, default=720, nullable=False)
-    
+
+    # Face recognition configuration (per-camera) — §4.3
+    # face_detection_mode values: "standard" | "long_range"
+    face_detection_enabled = Column(Boolean, default=False, nullable=False)
+    face_detection_mode    = Column(String(16), default="standard", nullable=False)
+
     # Audit Timestamps[cite: 3]
     created_at       = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

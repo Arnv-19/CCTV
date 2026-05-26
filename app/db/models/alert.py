@@ -26,9 +26,24 @@ class Alert(Base):
     acknowledged_by  = Column(Integer, ForeignKey("users.id"), nullable=True)
     acknowledged_at  = Column(DateTime, nullable=True)
 
+    # ── Face recognition fields (§4.4) ────────────────────────────────────
+    # Nullable — only populated when a face is detected during this alert.
+    # face_status values: "matched" | "unknown" | "not_visible" | "too_small" | "low_quality"
+    face_employee_id = Column(
+        Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    face_name        = Column(String(128), nullable=True)   # employee name at time of alert
+    face_confidence  = Column(Float, nullable=True)         # cosine similarity 0.0–1.0
+    face_status      = Column(String(32), nullable=True)    # matched/unknown/not_visible/too_small/low_quality
+
     # ── Relationships ─────────────────────────────────────────────────────
     camera      = relationship("Camera", back_populates="alerts")
     acknowledger = relationship(
         "User", back_populates="acknowledged_alerts",
         foreign_keys=[acknowledged_by],
+    )
+    # Employee whose face was matched (nullable — only set when face_status="matched")
+    matched_employee = relationship(
+        "Employee", back_populates="alerts",
+        foreign_keys="Alert.face_employee_id",
     )

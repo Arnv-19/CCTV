@@ -234,11 +234,16 @@ class CameraManager:
         db_cams = load_cameras_from_db()
         db_cam  = next((c for c in db_cams if c["id"] == cam_id), None)
 
+        face_detection_enabled = False
+        face_detection_mode    = "standard"
+
         if db_cam:
-            url              = db_cam["stream_url"]
-            ingestion_fps    = db_cam["ingestion_fps"]
-            detection_width  = db_cam["detection_width"]
-            detection_height = db_cam["detection_height"]
+            url                    = db_cam["stream_url"]
+            ingestion_fps          = db_cam["ingestion_fps"]
+            detection_width        = db_cam["detection_width"]
+            detection_height       = db_cam["detection_height"]
+            face_detection_enabled = db_cam.get("face_detection_enabled", False)
+            face_detection_mode    = db_cam.get("face_detection_mode", "standard")
         else:
             feeds = cfg.get("camera_feeds", [])
             if cam_id >= len(feeds):
@@ -291,6 +296,8 @@ class CameraManager:
             inference_fps=cfg.get("inference_fps", 4),
             burglar_test_sound=cfg.get("burglar_test_sound", False),
             frame_queue=cam_frame_queue,
+            face_detection_enabled=face_detection_enabled,
+            face_detection_mode=face_detection_mode,
         )
 
     def stop_camera(self, cam_id: int):
@@ -444,11 +451,13 @@ class CameraManager:
                     print(f"[CameraManager] Camera {cam_id}: no DB assignment — using config.yaml model.")
 
                 configs.append({
-                    "id":               cam_id,
-                    "url":              cam["stream_url"],
-                    "ingestion_fps":    cam["ingestion_fps"],
-                    "detection_width":  cam["detection_width"],
-                    "detection_height": cam["detection_height"],
+                    "id":                     cam_id,
+                    "url":                    cam["stream_url"],
+                    "ingestion_fps":          cam["ingestion_fps"],
+                    "detection_width":        cam["detection_width"],
+                    "detection_height":       cam["detection_height"],
+                    "face_detection_enabled": cam.get("face_detection_enabled", False),
+                    "face_detection_mode":    cam.get("face_detection_mode", "standard"),
                     **model_cfg,
                 })
             print(f"[CameraManager] Starting {len(configs)} camera(s) from DB.")
@@ -612,6 +621,8 @@ class CameraManager:
                 inference_fps=inference_fps,
                 burglar_test_sound=burglar_test_sound,
                 frame_queue=self.frame_queues.get(mk),
+                face_detection_enabled=cam_cfg.get("face_detection_enabled", False),
+                face_detection_mode=cam_cfg.get("face_detection_mode", "standard"),
             )
             started_any = True
 
@@ -655,6 +666,8 @@ class CameraManager:
         inference_fps: float,
         burglar_test_sound: bool,
         frame_queue,
+        face_detection_enabled: bool = False,
+        face_detection_mode: str = "standard",
     ):
         """
         Start (or restart) ingestion process + result handler thread for one camera.
@@ -737,6 +750,8 @@ class CameraManager:
                 burglar_alarm_config=burglar_alarm_cfg,
                 burglar_test_sound=bool(burglar_test_sound),
                 feature_config=feature_config,
+                face_detection_enabled=face_detection_enabled,
+                face_detection_mode=face_detection_mode,
             ),
             daemon=True,
             name=f"ResultHandler-{cam_id}",

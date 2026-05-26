@@ -14,6 +14,8 @@ from .burglar_alarm_event import BurglarAlarmEvent
 from .app_config import AppConfig
 from .vehicle_detection_event import VehicleDetectionEvent
 from .camera_model import CameraModel
+from .employee import Employee
+from .face_embedding import FaceEmbedding
 
 __all__ = [
     "Camera", "ROI", "BurglarAlarmConfig",
@@ -24,4 +26,6 @@ __all__ = [
     "AppConfig",
     "VehicleDetectionEvent",
     "CameraModel",
+    "Employee",
+    "FaceEmbedding",
 ]

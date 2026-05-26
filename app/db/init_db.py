@@ -26,7 +26,7 @@ load_dotenv()
 from sqlalchemy import text
 
 from app.db.database import Base, SessionLocal, ensure_database_connected
-from app.db.models import Alert, User, VehicleDetectionEvent  # noqa: F401 — ensures table is registered
+from app.db.models import Alert, User, VehicleDetectionEvent, Employee, FaceEmbedding  # noqa: F401 — ensures tables are registered
 from app.services.auth_service import hash_password
 
 
@@ -177,6 +177,115 @@ def create_tables():
             "  FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE SET NULL; "
             "END IF; "
             "END $$;"
+        ))
+
+        # ── Face recognition: per-camera config columns (safe no-ops on new installs)
+        conn.execute(text(
+            "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS face_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS face_mode VARCHAR(16) NOT NULL DEFAULT 'off'"
+        ))
+
+        # ── Employees table (created by create_all on new installs;
+        #    on existing deployments the columns may already exist — use IF NOT EXISTS)
+        conn.execute(text("""
+            DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'employees'
+            ) THEN
+                ALTER TABLE employees ADD COLUMN IF NOT EXISTS embedding      JSON;
+                ALTER TABLE employees ADD COLUMN IF NOT EXISTS embedding_aug  JSON;
+                ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_enrolled    BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE employees ADD COLUMN IF NOT EXISTS enrolled_at    TIMESTAMP;
+                ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_path     TEXT;
+                ALTER TABLE employees ADD COLUMN IF NOT EXISTS department     VARCHAR(128);
+            END IF;
+            END $$;
+        """))
+
+        # ── §4.2  face_embeddings table ──────────────────────────────────────
+        # create_all() handles new installs; this block adds the FK constraint
+        # on existing deployments where the table was created without it.
+        conn.execute(text("""
+            DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'face_embeddings_employee_id_fkey'
+            ) THEN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = 'face_embeddings'
+                ) THEN
+                    ALTER TABLE face_embeddings
+                    ADD CONSTRAINT face_embeddings_employee_id_fkey
+                    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE;
+                END IF;
+            END IF;
+            END $$;
+        """))
+
+        # ── §4.3  cameras — rename face_enabled / face_mode ──────────────────
+        # RENAME COLUMN is a no-op if the new name already exists.
+        # We guard with a column-existence check to stay idempotent.
+        conn.execute(text("""
+            DO $$ BEGIN
+            -- Rename face_enabled → face_detection_enabled
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cameras' AND column_name = 'face_enabled'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cameras' AND column_name = 'face_detection_enabled'
+            ) THEN
+                ALTER TABLE cameras RENAME COLUMN face_enabled TO face_detection_enabled;
+            END IF;
+            -- Ensure the column exists (new installs covered by create_all)
+            ALTER TABLE cameras ADD COLUMN IF NOT EXISTS
+                face_detection_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+            END $$;
+        """))
+        conn.execute(text("""
+            DO $$ BEGIN
+            -- Rename face_mode → face_detection_mode
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cameras' AND column_name = 'face_mode'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cameras' AND column_name = 'face_detection_mode'
+            ) THEN
+                ALTER TABLE cameras RENAME COLUMN face_mode TO face_detection_mode;
+                -- Migrate legacy values to the new vocabulary
+                UPDATE cameras SET face_detection_mode = 'standard'
+                WHERE face_detection_mode IN ('identify', 'detect');
+                UPDATE cameras SET face_detection_mode = 'standard'
+                WHERE face_detection_mode = 'off' OR face_detection_mode IS NULL;
+            END IF;
+            -- Ensure the column exists (new installs covered by create_all)
+            ALTER TABLE cameras ADD COLUMN IF NOT EXISTS
+                face_detection_mode VARCHAR(16) NOT NULL DEFAULT 'standard';
+            END $$;
+        """))
+
+        # ── §4.4  alerts — new face recognition columns ───────────────────────
+        conn.execute(text(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS "
+            "face_employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_alerts_face_employee_id "
+            "ON alerts (face_employee_id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS face_name VARCHAR(128)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS face_confidence FLOAT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS face_status VARCHAR(32)"
         ))
     print("[init_db] Tables created.")
 

@@ -43,12 +43,14 @@ def load_cameras_from_db() -> list[dict]:
             )
             cameras = [
                 {
-                    "id":               cam.id,
-                    "name":             cam.name,
-                    "stream_url":       cam.stream_url,
-                    "ingestion_fps":    cam.ingestion_fps,
-                    "detection_width":  cam.detection_width,
-                    "detection_height": cam.detection_height,
+                    "id":                     cam.id,
+                    "name":                   cam.name,
+                    "stream_url":             cam.stream_url,
+                    "ingestion_fps":          cam.ingestion_fps,
+                    "detection_width":        cam.detection_width,
+                    "detection_height":       cam.detection_height,
+                    "face_detection_enabled": cam.face_detection_enabled,
+                    "face_detection_mode":    cam.face_detection_mode,
                 }
                 for cam in rows
             ]
