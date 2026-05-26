@@ -11,6 +11,8 @@ class CameraCreate(BaseModel):
     ingestion_fps: int = 4
     detection_width: int = 960
     detection_height: int = 720
+    face_detection_enabled: Optional[bool] = False
+    face_detection_mode: Optional[str] = "standard"
 
 
 class CameraUpdate(BaseModel):
@@ -21,3 +23,5 @@ class CameraUpdate(BaseModel):
     ingestion_fps: Optional[int] = None
     detection_width: Optional[int] = None
     detection_height: Optional[int] = None
+    face_detection_enabled: Optional[bool] = None
+    face_detection_mode: Optional[str] = None

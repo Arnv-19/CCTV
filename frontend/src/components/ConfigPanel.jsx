@@ -27,6 +27,7 @@ function makeDraftCamera(index = 0) {
     ingestion_fps: 4,
     detection_width: 960,
     detection_height: 720,
+    face_detection_enabled: false,
   }
 }
 
@@ -730,6 +731,7 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
             ingestion_fps: cam.ingestion_fps ?? 4,
             detection_width: cam.detection_width ?? 960,
             detection_height: cam.detection_height ?? 720,
+            face_detection_enabled: cam.face_detection_enabled ?? false,
           })
         } else {
           await api.updateCamera(cam.id, {
@@ -740,6 +742,7 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
             ingestion_fps: cam.ingestion_fps,
             detection_width: cam.detection_width,
             detection_height: cam.detection_height,
+            face_detection_enabled: cam.face_detection_enabled,
           })
         }
       }
@@ -880,14 +883,15 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
 
             <Section title="Camera Streams">
               <div className="space-y-2">
-                <div className="hidden sm:grid sm:grid-cols-[1fr_160px_80px_36px] gap-2 text-xs text-zinc-500 px-1">
+                <div className="hidden sm:grid sm:grid-cols-[1fr_160px_80px_48px_36px] gap-2 text-xs text-zinc-500 px-1">
                   <span>RTSP / Stream URL</span>
                   <span>Title</span>
                   <span>FPS</span>
+                  <span title="Face Detection & Recognition" className="text-center">Face AI</span>
                   <span />
                 </div>
                 {cameras.map((camera, i) => (
-                  <div key={camera.id ?? `draft-${i}`} className="flex flex-col sm:grid sm:grid-cols-[1fr_160px_80px_36px] gap-2 sm:items-center rounded-lg sm:rounded-none bg-zinc-700/20 sm:bg-transparent p-2 sm:p-0">
+                  <div key={camera.id ?? `draft-${i}`} className="flex flex-col sm:grid sm:grid-cols-[1fr_160px_80px_48px_36px] gap-2 sm:items-center rounded-lg sm:rounded-none bg-zinc-700/20 sm:bg-transparent p-2 sm:p-0">
                     <input
                       className={inputCls}
                       value={camera.stream_url || ''}
@@ -910,6 +914,15 @@ export default function ConfigPanel({ onSaved, systemMetrics }) {
                         onChange={e => updateCamera(i, 'ingestion_fps', parseInt(e.target.value) || 1)}
                         title="Frames per second ingested from stream"
                       />
+                      <div className="flex justify-center items-center h-full">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-emerald-500 cursor-pointer"
+                          checked={camera.face_detection_enabled || false}
+                          onChange={e => updateCamera(i, 'face_detection_enabled', e.target.checked)}
+                          title="Enable face recognition for this camera"
+                        />
+                      </div>
                       <button
                         onClick={() => removeCamera(i)}
                         className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors shrink-0"

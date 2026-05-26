@@ -452,6 +452,7 @@ class CameraManager:
 
                 configs.append({
                     "id":                     cam_id,
+                    "name":                   cam.get("name", f"Camera {cam_id}"),
                     "url":                    cam["stream_url"],
                     "ingestion_fps":          cam["ingestion_fps"],
                     "detection_width":        cam["detection_width"],
@@ -609,6 +610,7 @@ class CameraManager:
             self._start_camera_worker(
                 cam_id=cam_id,
                 url=url,
+                camera_title=cam_cfg.get("name", f"Camera {cam_id}"),
                 threshold=cam_cfg.get("confidence_threshold", 0.25),
                 cooldown=cooldown,
                 snapshot_cooldown=snapshot_cooldown,
@@ -634,6 +636,7 @@ class CameraManager:
             cfg = get_config()
             self._start_camera_worker(
                 cam_id=0, url=0,
+                camera_title="Webcam 0",
                 threshold=cfg.get("confidence_threshold", 0.25),
                 cooldown=cooldown,
                 snapshot_cooldown=snapshot_cooldown,
@@ -654,6 +657,7 @@ class CameraManager:
         self,
         cam_id: int,
         url,
+        camera_title: str,
         threshold: float,
         cooldown: float,
         snapshot_cooldown: float,
@@ -752,6 +756,7 @@ class CameraManager:
                 feature_config=feature_config,
                 face_detection_enabled=face_detection_enabled,
                 face_detection_mode=face_detection_mode,
+                camera_title=camera_title,
             ),
             daemon=True,
             name=f"ResultHandler-{cam_id}",

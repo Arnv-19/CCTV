@@ -427,6 +427,7 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
     feature_config: dict = None,
     face_detection_enabled: bool = False,
     face_detection_mode: str = "standard",
+    camera_title: str = "",
 ):
     """
     Per-camera result handler thread (runs in main process).
@@ -1349,7 +1350,7 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2,
             )
 
-    def _draw_ppe_detections(resized, filtered_detections):
+    def _draw_ppe_detections(resized, filtered_detections, detected_faces_data=None):
         """Draw class-coloured bounding boxes for all PPE detections."""
         for det in filtered_detections:
             x1, y1, x2, y2 = map(int, det["box"])
@@ -1380,6 +1381,16 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
                 label = display_name.upper()
             else:
                 label = f"{display_name.upper()} {det['conf']:.2f}"
+                if cls_key in ("person", "persona", "human") and detected_faces_data:
+                    for fd in detected_faces_data:
+                        if "person_bbox" in fd:
+                            px1, py1, px2, py2 = fd["person_bbox"]
+                            if abs(x1 - px1) < 10 and abs(y1 - py1) < 10 and abs(x2 - px2) < 10 and abs(y2 - py2) < 10:
+                                if fd["status"] == "matched":
+                                    label = f"{fd['employee_name']} (ID: {fd['employee_id']})"
+                                else:
+                                    label = "Unknown Face"
+                                break
             color = (0, 255, 0) if _is_safe_class(class_name) else (0, 0, 255)
 
             if label in ("NH", "NV", "NGO", "NGL"):
@@ -1478,6 +1489,7 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
                             int(py1 + ph * 0.35)
                         ]
                         cached_match["bbox"] = new_fb
+                        cached_match["person_bbox"] = p_box
                         cached_match["last_seen_frame"] = frame_count
                         detected_faces_data.append(cached_match)
                     else:
@@ -1500,6 +1512,7 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
                                 ]
                                 new_entry = {
                                     "bbox": fb_abs,
+                                    "person_bbox": p_box,
                                     "employee_id": best_emp.id if best_emp else None,
                                     "employee_name": best_emp.name if best_emp else None,
                                     "confidence": best_score,
@@ -1526,23 +1539,20 @@ def result_handler_worker(  # noqa: C901  (refactored into sub-functions below)
         _draw_tracker_boxes(resized)
         _handle_burglar_alarm(resized, burglar_candidates_raw)
         _handle_vehicle_detection(resized, vehicle_dets_raw)
-        _draw_ppe_detections(resized, filtered_detections)
+        _draw_ppe_detections(resized, filtered_detections, detected_faces_data if face_detection_enabled else None)
 
         if face_detection_enabled:
             for fd in detected_faces_data:
                 fx1, fy1, fx2, fy2 = fd["bbox"]
                 if fd["status"] == "matched":
                     color = (0, 255, 0)
-                    label = f"{fd['employee_name']} (ID: {fd['employee_id']})"
                 else:
                     color = (0, 0, 255)
-                    label = "Unknown"
                 cv2.rectangle(resized, (fx1, fy1), (fx2, fy2), color, 1)
-                cv2.putText(resized, label, (fx1, max(0, fy1 - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
         fps = 1.0 / (time.time() - start + 1e-5)
-        cv2.putText(resized, f"Cam {cam_id} | FPS: {fps:.1f} | Violations: {violations}",
+        _overlay_title = camera_title or f"Cam {cam_id}"
+        cv2.putText(resized, f"{_overlay_title} | FPS: {fps:.1f} | Violations: {violations}",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         # Manager dict is already serialised internally; explicit lock is redundant
